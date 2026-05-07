@@ -1,9 +1,3 @@
-* {
-    box-sizing: border-box;
-    margin: 0;
-    padding: 0;
-}
-
 :root {
     --bg-black: #343434;
     --gray-dark: #4e4d4e;
@@ -14,6 +8,7 @@
     --accent: #66fcf1;
     --accent-rgb: 102, 252, 241;
     
+    /* Dynamic Background Variables */
     --grad-1: #1a1c23; 
     --grad-2: #2d313c; 
     
@@ -23,9 +18,11 @@
     --nav-height: 70px;
 }
 
-html {
+html, body {
     width: 100%;
     height: 100%;
+    margin: 0;
+    padding: 0;
     overflow: hidden;
 }
 
@@ -35,7 +32,7 @@ body {
     display: flex;
     flex-direction: column;
     zoom: 0.8;
-    width: 125vw; 
+    width: 125vw;
     height: 125vh;
     
     background: radial-gradient(circle at top right, var(--grad-2), transparent),
@@ -149,24 +146,47 @@ input:focus, select:focus {
 .view { display: none; flex: 1; height: calc(100% - var(--nav-height)); padding: 30px; }
 .view.active { display: flex; justify-content: center; align-items: center; }
 
-/* UPGRADED CENTERED PANEL */
+.portal-wrapper {
+    position: relative;
+    width: 95%;            
+    max-width: 450px;      
+    margin: auto;          
+    z-index: 1;            
+    height: auto;          
+}
+
+.portal-mascot {
+    position: absolute;
+    top: 10%;                
+    left: 50%;
+    transform: translate(-50%, -60%); 
+    height: clamp(100px, 20vw, 160px); 
+    z-index: -1;  
+}
+
 .centered-panel {
     background: rgba(30, 33, 40, 0.9);
     backdrop-filter: blur(15px);
     -webkit-backdrop-filter: blur(15px);
     padding: 30px;
     border-radius: 16px;
-    width: 95%;           
-    max-width: 450px;     
+    width: 100%;           
     text-align: center;
     border: 1px solid rgba(255, 255, 255, 0.1);
     box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
-    margin: auto;          
+    margin: 0;             
+    animation: floatIn 0.5s ease-out forwards;
+}
+
+@keyframes floatIn {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
 }
 
 .centered-panel h2 {
     font-size: 1.8rem;
     margin-bottom: 8px;
+    margin-top: 0;
     color: var(--accent);
     letter-spacing: -0.5px;
 }
@@ -175,63 +195,11 @@ input:focus, select:focus {
     color: var(--text-muted);
     font-size: 0.95rem;
     margin-bottom: 25px;
-}
-
-/* BIG SCALEABLE BUTTONS */
-.action-buttons {
-    display: flex;
-    gap: 15px;
-    margin-top: 25px;
-}
-
-.action-buttons button {
-    flex: 1;
-    padding: 16px;         
-    font-size: 1.1rem;
-    font-weight: 800;
-    border-radius: 10px;
-    text-transform: uppercase;
-}
-
-/* MOBILE RESPONSIVENESS FIX */
-@media (max-width: 480px) {
-    body {
-        zoom: 1.0;        
-        width: 100vw;
-        height: 100vh;
-    }
-
-    .centered-panel {
-        padding: 20px;     
-    }
-
-    .centered-panel h2 {
-        font-size: 1.5rem;
-    }
-
-    .action-buttons {
-        flex-direction: column;
-    }
-}
-
-.slider-captcha-wrapper {
-    width: 100%;
-    margin: 20px 0;
-}
-
-.slider-puzzle-container {
-    width: 100% !important; 
-    height: auto;
-    aspect-ratio: 16 / 7;    
-}
-
-@keyframes floatIn {
-    from { opacity: 0; transform: translateY(20px); }
-    to { opacity: 1; transform: translateY(0); }
+    margin-top: 0;
 }
 
 .action-buttons { display: flex; gap: 15px; margin-top: 25px; }
-.action-buttons button { flex: 1; padding: 14px; font-size: 1rem;}
+.action-buttons button { flex: 1; padding: 16px; font-size: 1.1rem; font-weight: 800; border-radius: 10px; text-transform: uppercase;}
 .message { margin-top: 15px; font-size: 0.9rem; min-height: 20px; font-weight: 500;}
 .message.error { color: var(--error); }
 .message.success { color: var(--success); }
@@ -444,7 +412,6 @@ tr:hover { background: rgba(255,255,255,0.02); }
     justify-content: center;
     align-items: center;
     
-    /* Reverse the 80% body zoom safely for modal overlays */
     transform: scale(1.25);
     transform-origin: top left;
 }
@@ -499,7 +466,8 @@ tr:hover { background: rgba(255,255,255,0.02); }
     gap: 8px;
 }
 
-.radio-group input[type="radio"] {
+.radio-group input[type="radio"],
+input[type="checkbox"] {
     width: 16px;
     height: 16px;
     margin: 0;
@@ -709,6 +677,12 @@ tr:hover { background: rgba(255,255,255,0.02); }
 }
 
 @media (max-width: 768px) {
+    body {
+        zoom: 1.0;         
+        width: 100vw;
+        height: 100vh;
+    }
+
     .desktop-header {
         display: none !important;
     }
@@ -738,13 +712,13 @@ tr:hover { background: rgba(255,255,255,0.02); }
     }
 
     .centered-panel {
-        width: 90%;
-        padding: 25px;
+        padding: 20px;
     }
-
-    .big-btn-container {
+    .centered-panel h2 {
+        font-size: 1.5rem;
+    }
+    .action-buttons {
         flex-direction: column;
-        align-items: center;
     }
 }
 
@@ -783,14 +757,15 @@ th {
 .slider-captcha-wrapper {
     position: relative;
     width: 100%;
-    margin-bottom: 8px;
+    margin: 20px 0;
     touch-action: none;
     text-align: left;
 }
 .slider-puzzle-container {
     position: relative;
-    width: 100%;
-    height: 120px; 
+    width: 100% !important;
+    height: auto;
+    aspect-ratio: 16 / 7;
     border-radius: 6px;
     overflow: hidden;
     background-color: #e5e7eb;
@@ -887,49 +862,4 @@ th {
     margin-top: 4px;
     display: none;
     text-align: center;
-}
-
-.portal-mascot {
-    position: absolute;
-    top: 10%; 
-    left: 50%;
-    
-    transform: translate(-50%, -60%); 
-    height: clamp(100px, 20vw, 160px); 
-    
-    z-index: -1;  
-}
-
-.portal-wrapper {
-    position: relative;
-    width: 95%;            
-    max-width: 450px;      
-    margin: auto;          
-    z-index: 1;            
-    height: auto;          
-}
-
-.portal-mascot {
-    position: absolute;
-    top: -5%;               
-    left: 50%;
-    
-    transform: translate(-50%, -60%); 
-    
-    height: clamp(100px, 20vw, 160px); 
-    
-    z-index: -1;  
-}
-
-.centered-panel {
-    background: rgba(30, 33, 40, 0.9);
-    backdrop-filter: blur(15px);
-    -webkit-backdrop-filter: blur(15px);
-    padding: 30px;
-    border-radius: 16px;
-    width: 100%;           
-    text-align: center;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
-    margin: 0;             
 }
