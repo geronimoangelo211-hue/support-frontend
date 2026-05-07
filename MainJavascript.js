@@ -2912,10 +2912,12 @@ function renderMainDashboard() {
 
             svgHTML += `</svg>`;
             
-            let labelsHTML = `<div style="display: flex; justify-content: space-between; margin-top: 15px; color: var(--text-muted); font-size: 11px; padding: 0;">`;
+            let labelsHTML = `<div style="position: relative; height: 20px; margin-top: 15px; color: var(--text-muted); font-size: 11px; width: 100%;">`;
             const lineLabels = ['4a','5a','6a','7a','8a','9a','10a','11a','12p','1p','2p','3p','4p','5p','6p','7p','8p','9p','10p','11p','12a','1a','2a','3a'];
-            lineLabels.forEach(lbl => {
-                labelsHTML += `<span style="flex: 1; text-align: center;">${lbl}</span>`;
+            
+            lineLabels.forEach((lbl, i) => {
+                let xPct = (i / 23) * 100;
+                labelsHTML += `<span style="position: absolute; left: ${xPct}%; transform: translateX(-50%);">${lbl}</span>`;
             });
             labelsHTML += `</div>`;
             
