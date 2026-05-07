@@ -139,6 +139,8 @@ async function toggleAttendanceState(checkbox) {
         return;
     }
 
+    await pullFromCloud();
+
     const isLocked = checkbox.checked;
     let config;
     try { config = JSON.parse(localStorage.getItem('sys_config') || '{"locked":false,"regOpen":false}'); } 
@@ -1402,6 +1404,8 @@ async function factoryReset() {
 }
 
 async function handleTimeIn() {
+    await pullFromCloud();
+
     const idInput = document.getElementById('student-id-input'); 
     const messageEl = document.getElementById('student-message');
 
@@ -1483,9 +1487,8 @@ async function handleTimeIn() {
     logs.push(newLog);
 
     localStorage.setItem('attendanceLogs', JSON.stringify(logs));
-
     localStorage.setItem('activeDeviceStudent', student.id);
-    checkDeviceLock();
+    checkDeviceLock(); 
     
     messageEl.textContent = `Success: ${student.name} - ${actionStr} at ${shift.realTimeStr}`;
     messageEl.className = "message success";
@@ -4203,6 +4206,8 @@ function viewHistoryDetails(studentId, historyDateStr) {
 }
 
 async function handleTimeOut() {
+    await pullFromCloud();
+
     const idInput = document.getElementById('student-id-input'); 
     const messageEl = document.getElementById('student-message');
 
@@ -4263,7 +4268,7 @@ async function handleTimeOut() {
         return;
     }
 
-    const reportData = await askForShiftReport(student.gcHandle);
+    const reportData = await askForShiftReport(student.gcHandle, student.name);
 
     const newLog = {
         name: student.name,
@@ -4280,7 +4285,7 @@ async function handleTimeOut() {
 
     logs.push(newLog);
     localStorage.setItem('attendanceLogs', JSON.stringify(logs));
-
+    
     localStorage.removeItem('activeDeviceStudent');
     checkDeviceLock();
     
