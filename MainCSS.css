@@ -176,12 +176,18 @@ input:focus, select:focus {
     -webkit-backdrop-filter: blur(15px);
     padding: 30px;
     border-radius: 16px;
-    width: 100%;           
+    width: 95%;          
+    max-width: 450px;      
     text-align: center;
     border: 1px solid rgba(255, 255, 255, 0.1);
     box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
-    margin: 0;             
+    margin: auto;         
     animation: floatIn 0.5s ease-out forwards;
+}
+
+.portal-wrapper .centered-panel {
+    width: 100%;
+    margin: 0;
 }
 
 @keyframes floatIn {
