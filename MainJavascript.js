@@ -426,6 +426,8 @@ document.addEventListener('DOMContentLoaded', () => {
     loadAccentColor();
     document.body.classList.add('portal-mode');
 
+    updateDailyMascot();
+
     checkBackendLockStatus().then(() => {
         applyUIRestrictions();
         initDevUI();
@@ -495,9 +497,11 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 setInterval(async () => {
+    updateDailyMascot();
     await pullFromCloud(); 
     await checkBackendLockStatus(); 
     checkDeviceLock(); 
+    
 
     if (isAuthenticated()) {
         if (document.getElementById('admin-dashboard-view').classList.contains('active')) {
@@ -4377,3 +4381,32 @@ function askForShiftReport(defaultGc) {
     });
 }
 
+function updateDailyMascot() {
+    const mascotImg = document.getElementById('portal-mascot-img');
+    if (!mascotImg) return;
+
+    const todayStr = new Date().toLocaleDateString(); 
+    const savedDate = localStorage.getItem('mascot_date');
+    let currentCatId = parseInt(localStorage.getItem('mascot_id')) || 1;
+
+    if (savedDate !== todayStr) {
+        let newCatId;
+        
+        do {
+            newCatId = Math.floor(Math.random() * 16) + 1; 
+        } while (newCatId === currentCatId);
+
+        currentCatId = newCatId;
+        localStorage.setItem('mascot_id', currentCatId);
+        localStorage.setItem('mascot_date', todayStr);
+
+        mascotImg.style.animation = 'none';
+        mascotImg.offsetHeight; 
+        mascotImg.style.animation = 'floatIn 0.5s ease-out forwards';
+    }
+
+    const newSrc = `images/cat${currentCatId}.gif`;
+    if (!mascotImg.src.includes(newSrc)) {
+        mascotImg.src = newSrc;
+    }
+}
