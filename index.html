@@ -139,33 +139,38 @@
             </p>
         </div>
 
-        <div class="centered-panel" id="turn-in-form">
-            <h3>Student Online Support</h3>
-            <p>Enter your Student ID to log your attendance.</p>
-
-            <p id="device-lock-msg" style="color: #f59e0b; font-size: 0.85rem; font-weight: bold; display: none; margin-top: 10px; background: rgba(245, 158, 11, 0.1); padding: 8px; border-radius: 4px; border: 1px solid #f59e0b;"></p>
-            <input type="text" id="student-id-input" placeholder="Enter Student ID Number">
+        <div class="portal-wrapper">
+            <img src="images/cat1.gif" class="portal-mascot" alt="Mascot">
             
-            <label style="color: var(--text-muted); font-size: 0.85rem; font-weight: bold; margin-bottom: 5px; display: block; text-align: left;">Verify you are human:</label>
-            <div class="slider-captcha-wrapper" id="studentSliderWrapper">
-                <div class="slider-puzzle-container">
-                    <canvas id="studentCaptchaBg"></canvas>
-                    <canvas id="studentCaptchaPiece"></canvas>
-                    <div class="captcha-refresh" id="studentRefreshCaptcha">↻</div>
-                </div>
-                <div class="slider-control" id="studentSliderControl">
-                    <div class="slider-track-text" id="studentSliderTrackText">Slide to complete the puzzle</div>
-                    <div class="slider-fill" id="studentSliderFill"></div>
-                    <div class="slider-thumb" id="studentSliderThumb">➔</div>
-                </div>
-            </div>
-            <div id="studentCaptchaError">Puzzle failed. Please try again.</div>
+            <div class="centered-panel" id="turn-in-form">
+                <h2>Student Online Support</h2>
+                <p>Enter your Student ID to log your attendance.</p>
 
-            <div class="action-buttons">
-                <button class="btn-in" onclick="handleTimeIn()">Time In</button>
-                <button class="btn-out" onclick="handleTimeOut()">Time Out</button>
+                <input type="text" id="student-id-input" placeholder="Enter Student ID Number" autocomplete="off">
+                
+                <label style="color: var(--text-muted); font-size: 0.85rem; font-weight: bold; margin-bottom: 5px; display: block; text-align: left;">Verify you are human:</label>
+                <div class="slider-captcha-wrapper" id="studentSliderWrapper">
+                    <div class="slider-puzzle-container">
+                        <canvas id="studentCaptchaBg"></canvas>
+                        <canvas id="studentCaptchaPiece"></canvas>
+                        <div class="captcha-refresh" id="studentRefreshCaptcha">↻</div>
+                    </div>
+                    <div class="slider-control" id="studentSliderControl">
+                        <div class="slider-track-text" id="studentSliderTrackText">Slide to complete the puzzle</div>
+                        <div class="slider-fill" id="studentSliderFill"></div>
+                        <div class="slider-thumb" id="studentSliderThumb">➔</div>
+                    </div>
+                </div>
+                <div id="studentCaptchaError">Puzzle failed. Please try again.</div>
+
+                <div id="device-lock-msg" style="display: none; margin-bottom: 15px; color: #f59e0b; background: rgba(245, 158, 11, 0.1); padding: 12px; border-radius: 8px; border: 1px solid rgba(245, 158, 11, 0.3); font-size: 0.9rem; line-height: 1.4; text-align: center;"></div>
+                
+                <div class="action-buttons">
+                    <button class="btn-in" onclick="handleTimeIn()">Time In</button>
+                    <button class="btn-out" onclick="handleTimeOut()">Time Out</button>
+                </div>
+                <p id="student-message" class="message"></p>
             </div>
-            <p id="student-message" class="message"></p>
         </div>
 
         <div class="centered-panel" id="locked-screen" style="display: none;">
@@ -274,7 +279,8 @@
                                     <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding-top: 15px; min-height: 0;">
                                         <div id="dash-pie-chart" class="pie-chart"></div>
                                         <div style="display: flex; gap: 15px; margin-top: 25px; font-weight: bold; font-size: 13px;">
-                                            <span style="color: var(--success);"><span style="display:inline-block; width:12px; height:12px; background:var(--success); border-radius:50%; margin-right:5px;"></span>Present</span>
+                                            <span style="color: var(--success);"><span style="display:inline-block; width:12px; height:12px; background:var(--success); border-radius:50%; margin-right:5px;"></span>On Time</span>
+                                            <span style="color: #f59e0b;"><span style="display:inline-block; width:12px; height:12px; background:#f59e0b; border-radius:50%; margin-right:5px;"></span>Late</span>
                                             <span style="color: var(--error);"><span style="display:inline-block; width:12px; height:12px; background:var(--error); border-radius:50%; margin-right:5px;"></span>Absent</span>
                                         </div>
                                     </div>
