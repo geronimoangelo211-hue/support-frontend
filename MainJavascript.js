@@ -2774,8 +2774,16 @@ function renderMainDashboard() {
 
         const pieChart = document.getElementById('dash-pie-chart');
         if (totalScheduled > 0 && pieChart) {
-            const presentPct = (presentCount / totalScheduled) * 100;
-            pieChart.style.background = `conic-gradient(var(--success) 0% ${presentPct}%, var(--error) ${presentPct}% 100%)`;
+            const onTimeCount = presentCount - lateCount;
+            const onTimePct = (onTimeCount / totalScheduled) * 100;
+            const latePct = (lateCount / totalScheduled) * 100;
+            const combinedPresentPct = onTimePct + latePct;
+            
+            pieChart.style.background = `conic-gradient(
+                var(--success) 0% ${onTimePct}%, 
+                #f59e0b ${onTimePct}% ${combinedPresentPct}%, 
+                var(--error) ${combinedPresentPct}% 100%
+            )`;
         } else if (pieChart) {
             pieChart.style.background = `conic-gradient(#334155 0% 100%)`;
         }
@@ -2841,12 +2849,12 @@ function renderMainDashboard() {
         populateCounts(timeInLogs, hourlyInCounts);
         populateCounts(timeOutLogs, hourlyOutCounts);
 
-        const maxLineVal = 20; 
+        const maxLineVal = 25; 
         const lineChartContainer = document.getElementById('dash-line-chart-container');
         if (lineChartContainer) {
             let svgHTML = `<svg width="100%" height="100%" viewBox="-40 -20 1080 260" preserveAspectRatio="none" style="flex: 1; display: block; overflow: visible;">`;
             
-            for(let val = 0; val <= 20; val += 5) {
+            for(let val = 0; val <= 25; val += 5) {
                 let yLine = 200 - ((val / maxLineVal) * 200);
                 svgHTML += `<line x1="0" y1="${yLine}" x2="1000" y2="${yLine}" stroke="rgba(255,255,255,0.1)" stroke-width="1.5" />`;
                 svgHTML += `<text x="-15" y="${yLine + 5}" fill="var(--text-muted)" font-size="14" font-weight="bold" text-anchor="end">${val}</text>`;
