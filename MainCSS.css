@@ -769,20 +769,20 @@ th {
 }
 .slider-puzzle-container {
     position: relative;
-    width: 100% !important;
-    height: auto;
-    aspect-ratio: 16 / 7;
+    width: 100%;
+    height: 120px;        
     border-radius: 6px;
     overflow: hidden;
-    background-color: #e5e7eb;
+    background-color: #121419;
     margin-bottom: 10px;
     border: 1px solid #333a45;
 }
+
 #studentCaptchaBg {
     display: block;
-    width: 100%;
-    height: 100%;
+    
 }
+
 #studentCaptchaPiece {
     position: absolute;
     top: 0;
