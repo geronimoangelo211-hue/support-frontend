@@ -1,3 +1,9 @@
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
 :root {
     --bg-black: #343434;
     --gray-dark: #4e4d4e;
@@ -8,7 +14,6 @@
     --accent: #66fcf1;
     --accent-rgb: 102, 252, 241;
     
-    /* Dynamic Background Variables */
     --grad-1: #1a1c23; 
     --grad-2: #2d313c; 
     
@@ -126,15 +131,16 @@ button:hover {
 
 input, select {
     width: 100%;
-    padding: 14px 15px;
+    padding: 12px 15px;    
     margin: 10px 0;
     background-color: #121419;
     border: 1px solid #333a45;
     color: var(--text-main);
-    border-radius: 6px;
+    border-radius: 8px;    
     transition: all 0.3s ease;
     outline: none;
     font-size: 14px;
+    box-sizing: border-box; 
 }
 
 input:focus, select:focus { 
@@ -157,7 +163,7 @@ input:focus, select:focus {
 
 .portal-mascot {
     position: absolute;
-    top: -4%;                
+    top: -2.5%;                
     left: 55%;
     transform: translate(-50%, -60%); 
     height: clamp(100px, 20vw, 160px); 
