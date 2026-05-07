@@ -1483,6 +1483,9 @@ async function handleTimeIn() {
     logs.push(newLog);
 
     localStorage.setItem('attendanceLogs', JSON.stringify(logs));
+
+    localStorage.setItem('activeDeviceStudent', student.id);
+    checkDeviceLock();
     
     messageEl.textContent = `Success: ${student.name} - ${actionStr} at ${shift.realTimeStr}`;
     messageEl.className = "message success";
@@ -3520,16 +3523,22 @@ function checkDeviceLock() {
         const student = students.find(s => String(s.id) === String(activeId));
         
         if (student) {
-            const todayLogs = getTodayLogs(activeId);
-            const hasTimeIn = todayLogs.some(l => l.action.includes('Time In'));
+            const logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
+            const shift = getShiftDateDetails();
+            const todayLogs = logs.filter(l => String(l.id) === String(activeId) && l.date === shift.dateStr);
+            
+            const timeInLog = todayLogs.find(l => l.action.includes('Time In'));
             const hasTimeOut = todayLogs.some(l => l.action.includes('Time Out'));
             
-            if (hasTimeIn && !hasTimeOut) {
+            if (timeInLog && !hasTimeOut) {
                 idInput.value = activeId;
                 idInput.disabled = true;
-                btnIn.style.display = 'none';
+                btnIn.style.display = 'none'; 
                 lockMsg.style.display = 'block';
-                lockMsg.innerHTML = `🔒 Device locked to <strong>${student.name || 'Unknown'}</strong>.<br><span style="font-size: 0.75rem; color: var(--text-muted);">You must Time Out to free this device.</span>`;
+                
+                lockMsg.innerHTML = `🔒 Device locked to <strong>${student.name || 'Unknown'}</strong>.<br>
+                <span style="font-size: 0.85rem; color: var(--text-main);">Time In: <span style="color: var(--success); font-weight: bold;">${timeInLog.time}</span></span><br>
+                <span style="font-size: 0.75rem; color: var(--text-muted); margin-top: 5px; display: inline-block;">You must Time Out to free this device.</span>`;
                 return; 
             }
         }
@@ -3545,10 +3554,10 @@ function resetDeviceLockUI(idInput, btnIn, lockMsg) {
         }
         idInput.disabled = false;
     }
-    if(btnIn) btnIn.style.display = 'inline-block';
+    if(btnIn) btnIn.style.display = 'inline-block'; 
     if(lockMsg) {
         lockMsg.style.display = 'none';
-        lockMsg.textContent = '';
+        lockMsg.innerHTML = '';
     }
 }
 
@@ -4261,6 +4270,9 @@ async function handleTimeOut() {
 
     logs.push(newLog);
     localStorage.setItem('attendanceLogs', JSON.stringify(logs));
+
+    localStorage.removeItem('activeDeviceStudent');
+    checkDeviceLock();
     
     messageEl.textContent = `Success: Shift Report submitted and Time Out recorded!`;
     messageEl.className = "message success";
@@ -4349,3 +4361,4 @@ function askForShiftReport(defaultGc) {
         };
     });
 }
+
