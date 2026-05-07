@@ -2777,7 +2777,7 @@ function renderMainDashboard() {
             const onTimeCount = presentCount - lateCount;
             const onTimePct = (onTimeCount / totalScheduled) * 100;
             const latePct = (lateCount / totalScheduled) * 100;
-            const combinedPresentPct = onTimePct + latePct;
+            const combinedPresentPct = onTimePct + latePct; 
             
             pieChart.style.background = `conic-gradient(
                 var(--success) 0% ${onTimePct}%, 
@@ -2832,7 +2832,9 @@ function renderMainDashboard() {
         function populateCounts(targetLogs, arr) {
             targetLogs.forEach(log => {
                 if(log.time === 'Exempted') return;
-                const timeMatch = log.time.match(/(\d+):(\d+)\s+(AM|PM)/i);
+                
+                const timeMatch = log.time.match(/(\d+):(\d+)(?::\d+)?\s+(AM|PM)/i);
+                
                 if (timeMatch) {
                     let h = parseInt(timeMatch[1]);
                     const ampm = timeMatch[3].toUpperCase();
