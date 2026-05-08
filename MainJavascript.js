@@ -240,10 +240,11 @@ async function pushStudentsToCloud() {
     } catch (err) {}
 }
 
+let isSyncing = false;
 let lastDataPushTime = 0;
 
 async function pushLogsToCloud() {
-    isSyncing = true; 
+    isSyncing = true; // Lock the sync engine
     const studentsData = localStorage.getItem('students') || "[]";
     const logsData = localStorage.getItem('attendanceLogs') || "[]";
     const configData = localStorage.getItem('sys_config') || '{"locked":false,"regOpen":false}';
@@ -263,21 +264,20 @@ async function pushLogsToCloud() {
     } catch (e) {
         console.error("Cloud push failed.", e);
     } finally {
-        isSyncing = false; 
+        isSyncing = false; // Release the lock
     }
 }
 
 async function pullFromCloud() {
-    if (isSyncing) return; // Prevent pulling while saving
-    const fetchStartTime = Date.now(); // Stamp when the request started
+    if (isSyncing) return; 
+    const fetchStartTime = Date.now();
 
     try {
-        const response = await fetch(`${API_BASE_URL}/sync/pull`);
+        const response = await fetch(`${API_BASE_URL}/sync/pull`, { cache: 'no-store' });
+        
         if (response.ok) {
             const data = await response.json();
             
-            // CRITICAL FIX: If you saved data locally AFTER this request started, 
-            // discard this old server data so it doesn't wipe your screen!
             if (lastDataPushTime > fetchStartTime) return; 
 
             const serverHasStudents = (data.students && data.students !== "[]" && data.students !== "null");
@@ -286,11 +286,13 @@ async function pullFromCloud() {
             const localStudents = localStorage.getItem('students');
             const localLogs = localStorage.getItem('attendanceLogs');
 
+            // If the server is empty but you have local data, push it up to restore the server
             if (!serverHasStudents && !serverHasLogs && (localStudents || localLogs)) {
                 await pushLogsToCloud();
                 return; 
             }
 
+            // Only overwrite local data if 5 seconds have passed since your last manual edit
             if (Date.now() - lastDataPushTime > 5000) {
                 if (serverHasStudents) localStorage.setItem('students', data.students);
                 if (serverHasLogs) localStorage.setItem('attendanceLogs', data.logs);
