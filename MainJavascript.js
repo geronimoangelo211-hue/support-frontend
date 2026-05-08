@@ -1090,36 +1090,46 @@ async function logAttendanceAction(student, action, endOfShiftDetails = null, ov
 async function deleteLog(idNum, dateStr) {
     if(!isAuthenticated()) return;
 
+    // 1. Safety check to ensure the button actually passed the right data
+    if (!idNum || !dateStr) {
+        console.error("Delete failed: Missing ID or Date. ID:", idNum, "Date:", dateStr);
+        alert("System error: Missing log data. Check console.");
+        return;
+    }
+
     const confirmDelete = confirm("Are you sure you want to delete this attendance record?");
     if (!confirmDelete) return;
 
-    // --- 1. INSTANT FRONTEND REMOVAL ---
+    // 2. INSTANT FRONTEND REMOVAL (Optimistic UI)
     let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
+    const originalLength = logs.length;
     
-    // Filter out the deleted log locally
-    const updatedLogs = logs.filter(l => !(String(l.id) === String(idNum) && l.date === dateStr));
+    // Filter out the deleted log (using String and trim() to guarantee a match)
+    const updatedLogs = logs.filter(l => 
+        !(String(l.id).trim() === String(idNum).trim() && String(l.date).trim() === String(dateStr).trim())
+    );
     
+    if (updatedLogs.length === originalLength) {
+        console.warn("Warning: Could not find the log to delete in local storage!");
+    }
+
     // Save the new list to browser memory instantly
     localStorage.setItem('attendanceLogs', JSON.stringify(updatedLogs));
     
-    // Lock the background sync immediately so the 15s timer doesn't pull old data
+    // Lock the background sync immediately!
     lastDataPushTime = Date.now(); 
 
-    // Instantly redraw the screen! The log will vanish instantly.
+    // Instantly redraw the screen! The log will vanish in milliseconds.
     forceInstantUIRefresh();
 
-    // --- 2. BACKGROUND DATABASE SYNC ---
-    // We start the spinner so they know it's syncing, but the UI is already updated.
+    // 3. BACKGROUND DATABASE SYNC
     const spinner = document.getElementById('live-log-spinner');
     if (spinner) spinner.style.display = 'inline-block';
 
     try {
-        // Push the new (smaller) list to Supabase in the background
         await pushLogsToCloud();
     } catch (e) {
         console.error("Failed to sync deletion to the cloud:", e);
-        // Optional: If the cloud fails, we let them know it didn't save permanently.
-        alert("Warning: The log was removed from your screen, but there was an error connecting to the database.");
     } finally {
         if (spinner) spinner.style.display = 'none';
     }
