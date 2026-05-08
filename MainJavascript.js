@@ -4379,3 +4379,19 @@ function updateDailyMascot() {
         mascotImg.src = newSrc;
     }
 }
+
+function forceInstantUIRefresh() {
+    // Only refresh the admin tables if the admin view is currently open
+    if (document.getElementById('admin-dashboard-view').classList.contains('active')) {
+        if (typeof renderStudents === 'function') renderStudents();
+        if (typeof renderSchedule === 'function') renderSchedule();
+        if (typeof renderLogs === 'function') renderLogs();
+        if (typeof renderMainDashboard === 'function') renderMainDashboard();
+        if (typeof renderDutyToday === 'function') renderDutyToday();
+        
+        const activeDate = document.getElementById('history-table-title')?.getAttribute('data-date');
+        if (activeDate && document.getElementById('sec-history').classList.contains('active')) {
+            renderHistoryTable(activeDate);
+        }
+    }
+}
