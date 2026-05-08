@@ -19,15 +19,13 @@ let isSyncing = false;
 let isBackendLocked = false; 
 
 setInterval(async () => {
+    updateDailyMascot();
     await pullFromCloud(); 
     await checkBackendLockStatus(); 
     checkDeviceLock(); 
+    
 
     if (isAuthenticated()) {
-        if (typeof sendHeartbeat === 'function') await sendHeartbeat(); 
-        
-        autoRestoreServerData();
-
         if (document.getElementById('admin-dashboard-view').classList.contains('active')) {
             renderStudents();
             renderSchedule();
@@ -35,10 +33,6 @@ setInterval(async () => {
             renderLogs();
             renderMainDashboard();
             renderDutyToday();
-            
-            if (document.getElementById('sec-settings').classList.contains('active')) {
-                fetchAdminAccounts(); 
-            }
             
             const secHist = document.getElementById('sec-history');
             if (secHist && secHist.classList.contains('active')) {
@@ -249,11 +243,11 @@ async function pushStudentsToCloud() {
 let lastDataPushTime = 0;
 
 async function pushLogsToCloud() {
+    isSyncing = true; 
     const studentsData = localStorage.getItem('students') || "[]";
     const logsData = localStorage.getItem('attendanceLogs') || "[]";
     const configData = localStorage.getItem('sys_config') || '{"locked":false,"regOpen":false}';
     
-    // Lock the sync engine for 5 seconds so old data doesn't overwrite your edits
     lastDataPushTime = Date.now(); 
     
     try {
@@ -268,15 +262,24 @@ async function pushLogsToCloud() {
         });
     } catch (e) {
         console.error("Cloud push failed.", e);
+    } finally {
+        isSyncing = false; 
     }
 }
 
 async function pullFromCloud() {
+    if (isSyncing) return; // Prevent pulling while saving
+    const fetchStartTime = Date.now(); // Stamp when the request started
+
     try {
         const response = await fetch(`${API_BASE_URL}/sync/pull`);
         if (response.ok) {
             const data = await response.json();
             
+            // CRITICAL FIX: If you saved data locally AFTER this request started, 
+            // discard this old server data so it doesn't wipe your screen!
+            if (lastDataPushTime > fetchStartTime) return; 
+
             const serverHasStudents = (data.students && data.students !== "[]" && data.students !== "null");
             const serverHasLogs = (data.logs && data.logs !== "[]" && data.logs !== "null");
 
@@ -495,32 +498,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 });
-
-setInterval(async () => {
-    updateDailyMascot();
-    await pullFromCloud(); 
-    await checkBackendLockStatus(); 
-    checkDeviceLock(); 
-    
-
-    if (isAuthenticated()) {
-        if (document.getElementById('admin-dashboard-view').classList.contains('active')) {
-            renderStudents();
-            renderSchedule();
-            renderDashboardSummary();
-            renderLogs();
-            renderMainDashboard();
-            renderDutyToday();
-            
-            const secHist = document.getElementById('sec-history');
-            if (secHist && secHist.classList.contains('active')) {
-                if (document.getElementById('history-table-container').style.display === 'none') {
-                    renderHistoryView();
-                }
-            }
-        }
-    }
-}, 15000);
 
 async function loginAdmin(event) {
     if (event) event.preventDefault();
@@ -880,7 +857,7 @@ async function updateStudentGC() {
 
     students[studentIndex].gcHandle = newGc;
     localStorage.setItem('students', JSON.stringify(students));
-    await pushStudentsToCloud(); 
+    await pushLogsToCloud();
 
     document.getElementById('edit-student-id').value = '';
     document.getElementById('edit-student-gc').value = '';
