@@ -19,13 +19,15 @@ let isSyncing = false;
 let isBackendLocked = false; 
 
 setInterval(async () => {
-    updateDailyMascot();
     await pullFromCloud(); 
     await checkBackendLockStatus(); 
     checkDeviceLock(); 
-    
 
     if (isAuthenticated()) {
+        if (typeof sendHeartbeat === 'function') await sendHeartbeat(); 
+        
+        autoRestoreServerData();
+
         if (document.getElementById('admin-dashboard-view').classList.contains('active')) {
             renderStudents();
             renderSchedule();
@@ -33,6 +35,10 @@ setInterval(async () => {
             renderLogs();
             renderMainDashboard();
             renderDutyToday();
+            
+            if (document.getElementById('sec-settings').classList.contains('active')) {
+                fetchAdminAccounts(); 
+            }
             
             const secHist = document.getElementById('sec-history');
             if (secHist && secHist.classList.contains('active')) {
@@ -240,15 +246,14 @@ async function pushStudentsToCloud() {
     } catch (err) {}
 }
 
-let isSyncing = false;
 let lastDataPushTime = 0;
 
 async function pushLogsToCloud() {
-    isSyncing = true; // Lock the sync engine
     const studentsData = localStorage.getItem('students') || "[]";
     const logsData = localStorage.getItem('attendanceLogs') || "[]";
     const configData = localStorage.getItem('sys_config') || '{"locked":false,"regOpen":false}';
     
+    // Lock the sync engine for 5 seconds so old data doesn't overwrite your edits
     lastDataPushTime = Date.now(); 
     
     try {
@@ -263,36 +268,26 @@ async function pushLogsToCloud() {
         });
     } catch (e) {
         console.error("Cloud push failed.", e);
-    } finally {
-        isSyncing = false; // Release the lock
     }
 }
 
 async function pullFromCloud() {
-    if (isSyncing) return; 
-    const fetchStartTime = Date.now();
-
     try {
-        const response = await fetch(`${API_BASE_URL}/sync/pull`, { cache: 'no-store' });
-        
+        const response = await fetch(`${API_BASE_URL}/sync/pull`);
         if (response.ok) {
             const data = await response.json();
             
-            if (lastDataPushTime > fetchStartTime) return; 
-
             const serverHasStudents = (data.students && data.students !== "[]" && data.students !== "null");
             const serverHasLogs = (data.logs && data.logs !== "[]" && data.logs !== "null");
 
             const localStudents = localStorage.getItem('students');
             const localLogs = localStorage.getItem('attendanceLogs');
 
-            // If the server is empty but you have local data, push it up to restore the server
             if (!serverHasStudents && !serverHasLogs && (localStudents || localLogs)) {
                 await pushLogsToCloud();
                 return; 
             }
 
-            // Only overwrite local data if 5 seconds have passed since your last manual edit
             if (Date.now() - lastDataPushTime > 5000) {
                 if (serverHasStudents) localStorage.setItem('students', data.students);
                 if (serverHasLogs) localStorage.setItem('attendanceLogs', data.logs);
@@ -500,6 +495,32 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 });
+
+setInterval(async () => {
+    updateDailyMascot();
+    await pullFromCloud(); 
+    await checkBackendLockStatus(); 
+    checkDeviceLock(); 
+    
+
+    if (isAuthenticated()) {
+        if (document.getElementById('admin-dashboard-view').classList.contains('active')) {
+            renderStudents();
+            renderSchedule();
+            renderDashboardSummary();
+            renderLogs();
+            renderMainDashboard();
+            renderDutyToday();
+            
+            const secHist = document.getElementById('sec-history');
+            if (secHist && secHist.classList.contains('active')) {
+                if (document.getElementById('history-table-container').style.display === 'none') {
+                    renderHistoryView();
+                }
+            }
+        }
+    }
+}, 15000);
 
 async function loginAdmin(event) {
     if (event) event.preventDefault();
@@ -859,7 +880,7 @@ async function updateStudentGC() {
 
     students[studentIndex].gcHandle = newGc;
     localStorage.setItem('students', JSON.stringify(students));
-    await pushLogsToCloud();
+    await pushStudentsToCloud(); 
 
     document.getElementById('edit-student-id').value = '';
     document.getElementById('edit-student-gc').value = '';
