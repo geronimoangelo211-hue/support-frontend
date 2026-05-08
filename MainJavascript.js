@@ -201,100 +201,105 @@ window.resolveSync = async function(action) {
 
 let lastConfigPushTime = 0;
 
-async function pullFromCloud() {
-    try {
-        const response = await fetch('http://localhost:8080/api/sync/all'); 
-        
-        if (!response.ok) throw new Error("Server not responding correctly.");
-        
-        const serverData = await response.json();
-        
-        if (serverData.students && serverData.students.length > 0) {
-            localStorage.setItem('students', JSON.stringify(serverData.students));
-        }
-        
-        if (serverData.logs && serverData.logs.length > 0) {
-            localStorage.setItem('attendanceLogs', JSON.stringify(serverData.logs));
-        }
-
-    } catch (error) {
-        console.warn("Pull from cloud failed. Keeping local data safe.", error);
-    }
-}
-
 async function pushStudentsToCloud() {
     const localStudents = localStorage.getItem('students');
-    if (!localStudents || localStudents === "[]") return; // Don't push empty data
+    if (!localStudents || localStudents === "[]") return; 
 
+    lastDataPushTime = Date.now();
     try {
-        const response = await fetch('http://localhost:8080/api/sync/students', {
+        await fetch(`${API_BASE_URL}/sync/students`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: localStudents
         });
-
-        if (!response.ok) {
-            console.error("Failed to push students to server!");
-        }
     } catch (error) {
-        console.error("Network error while pushing students.", error);
+        console.error("Failed to push students.", error);
     }
 }
 
 let lastDataPushTime = 0;
 
 async function pushLogsToCloud() {
-    const studentsData = localStorage.getItem('students') || "[]";
-    const logsData = localStorage.getItem('attendanceLogs') || "[]";
+    const logsData = localStorage.getItem('attendanceLogs');
     const configData = localStorage.getItem('sys_config') || '{"locked":false,"regOpen":false}';
     
-    // Lock the sync engine for 5 seconds so old data doesn't overwrite your edits
-    lastDataPushTime = Date.now(); 
+    // We send students too just in case your backend endpoint requires the full payload
+    const studentsData = localStorage.getItem('students') || "[]"; 
     
+    lastDataPushTime = Date.now(); 
     try {
         await fetch(`${API_BASE_URL}/sync/push`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 students: studentsData,
-                logs: logsData,
+                logs: logsData || "[]",
                 config: configData
             })
         });
     } catch (e) {
-        console.error("Cloud push failed.", e);
+        console.error("Failed to push logs.", e);
     }
 }
+
+async function pushConfigToCloud() {
+    const configData = localStorage.getItem('sys_config');
+    if (!configData) return;
+    
+    lastDataPushTime = Date.now();
+    try {
+        await fetch(`${API_BASE_URL}/sync/config`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: configData
+        });
+    } catch (e) {
+        console.error("Failed to push config.", e);
+    }
+}
+
+let lastDataPushTime = 0;
 
 async function pullFromCloud() {
     try {
         const response = await fetch(`${API_BASE_URL}/sync/pull`);
-        if (response.ok) {
-            const data = await response.json();
-            
-            const serverHasStudents = (data.students && data.students !== "[]" && data.students !== "null");
-            const serverHasLogs = (data.logs && data.logs !== "[]" && data.logs !== "null");
+        if (!response.ok) return;
+        
+        const data = await response.json();
+        
+        const localStudents = JSON.parse(localStorage.getItem('students') || "[]");
+        const localLogs = JSON.parse(localStorage.getItem('attendanceLogs') || "[]");
+        
+        // Safely parse what the server sent
+        const serverStudents = (data.students && data.students !== "null") ? JSON.parse(data.students) : [];
+        const serverLogs = (data.logs && data.logs !== "null") ? JSON.parse(data.logs) : [];
 
-            const localStudents = localStorage.getItem('students');
-            const localLogs = localStorage.getItem('attendanceLogs');
+        // THE SHIELD: If Render went to sleep and woke up empty (or with fewer students),
+        // DO NOT overwrite local storage. Instead, force an emergency upload to restore Render!
+        if (localStudents.length > serverStudents.length || localLogs.length > serverLogs.length) {
+            console.warn("Render server woke up empty! Activating emergency restore...");
+            await pushStudentsToCloud();
+            await pushLogsToCloud();
+            await pushConfigToCloud();
+            return; 
+        }
 
-            if (!serverHasStudents && !serverHasLogs && (localStudents || localLogs)) {
-                await pushLogsToCloud();
-                return; 
+        // If the server data is genuinely newer and heavier, safely accept it
+        if (Date.now() - lastDataPushTime > 5000) {
+            if (serverStudents.length > 0) {
+                localStorage.setItem('students', JSON.stringify(serverStudents));
             }
-
-            if (Date.now() - lastDataPushTime > 5000) {
-                if (serverHasStudents) localStorage.setItem('students', data.students);
-                if (serverHasLogs) localStorage.setItem('attendanceLogs', data.logs);
-                
-                if (data.config && data.config !== "{}" && data.config !== "null") {
-                    localStorage.setItem('sys_config', data.config);
-                    applySystemConfig(); 
-                }
+            if (serverLogs.length > 0) {
+                localStorage.setItem('attendanceLogs', JSON.stringify(serverLogs));
+            }
+            
+            if (data.config && data.config !== "{}" && data.config !== "null") {
+                localStorage.setItem('sys_config', data.config);
+                applySystemConfig(); 
             }
         }
     } catch (e) {
-        console.error("Cloud pull failed.", e);
+        console.warn("Cloud pull failed. Keeping local data safe.", e);
     }
 }
 
@@ -492,27 +497,45 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 setInterval(async () => {
-    updateDailyMascot();
-    await pullFromCloud(); 
-    await checkBackendLockStatus(); 
-    checkDeviceLock(); 
+    updateDailyMascot(); 
     
-
     if (isAuthenticated()) {
-        if (document.getElementById('admin-dashboard-view').classList.contains('active')) {
-            renderStudents();
-            renderSchedule();
-            renderDashboardSummary();
-            renderLogs();
-            renderMainDashboard();
-            renderDutyToday();
+        try {
+            // Check the server first (The Shield will protect you here)
+            await pullFromCloud(); 
             
-            const secHist = document.getElementById('sec-history');
-            if (secHist && secHist.classList.contains('active')) {
-                if (document.getElementById('history-table-container').style.display === 'none') {
-                    renderHistoryView();
+            // Auto-save
+            await pushStudentsToCloud();
+            await pushLogsToCloud();
+            await pushConfigToCloud();
+            
+            await checkBackendLockStatus(); 
+            checkDeviceLock(); 
+            
+            if (typeof sendHeartbeat === 'function') await sendHeartbeat(); 
+            autoRestoreServerData();
+
+            // Keep the UI fresh
+            if (document.getElementById('admin-dashboard-view').classList.contains('active')) {
+                renderStudents();
+                renderSchedule();
+                renderDashboardSummary();
+                renderLogs();
+                renderDutyToday();
+                
+                if (document.getElementById('sec-settings').classList.contains('active')) {
+                    fetchAdminAccounts(); 
+                }
+                
+                const secHist = document.getElementById('sec-history');
+                if (secHist && secHist.classList.contains('active')) {
+                    if (document.getElementById('history-table-container').style.display === 'none') {
+                        renderHistoryView();
+                    }
                 }
             }
+        } catch (error) {
+            // Silent fail to prevent stuttering if internet drops
         }
     }
 }, 15000);
