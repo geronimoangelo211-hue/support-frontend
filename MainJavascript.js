@@ -1136,7 +1136,10 @@ function closeExemptModal() {
 
 async function applyExempt(type) {
     if(!isAuthenticated()) return;
-    await pullFromCloud();
+    
+    // 1. Lock the sync engine immediately so background pulls don't interrupt the UI
+    lastDataPushTime = Date.now(); 
+
     let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
     const students = JSON.parse(localStorage.getItem('students')) || [];
     const s = students.find(x => String(x.id) === String(pendingExemptId));
@@ -1172,7 +1175,8 @@ async function applyExempt(type) {
         }
 
         localStorage.setItem('attendanceLogs', JSON.stringify(logs));
-        await pushLogsToCloud();
+        // 2. Push directly to Supabase in the background
+        await pushLogsToCloud(); 
         
         renderHistoryTable(pendingExemptDate);
         renderMainDashboard();
@@ -1210,7 +1214,10 @@ async function exemptAllForDate(dateStr) {
     const verificationText = prompt(`⚠️ WARNING ⚠️\n\nThis will mark EVERYONE on ${dateStr} as Exempted.\n\nTo confirm, type exactly:\nExempt Everyone`);
     
     if (verificationText === "Exempt Everyone") {
-        await pullFromCloud();
+        
+        // Lock the sync engine
+        lastDataPushTime = Date.now(); 
+        
         let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
         const students = JSON.parse(localStorage.getItem('students')) || [];
 
