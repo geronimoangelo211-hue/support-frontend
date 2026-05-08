@@ -4135,21 +4135,20 @@ function viewHistoryDetails(studentId, historyDateStr) {
 }
 
 async function handleTimeOut() {
-    // --- 1. Prevent Double Clicks & Start Animation ---
     const btnOut = document.querySelector('.btn-out');
-    let seqIndex = 0;
     let animInterval;
-    const saveSequence = ["Submitting.", "Submitting..", "Submitting..."];
-
+    
+    // --- 1. Lock Main Button & Animate ---
     if (btnOut) {
-        if (btnOut.disabled) return; // Locks the button so it only triggers ONCE
+        if (btnOut.disabled) return; 
         btnOut.disabled = true;
         btnOut.style.opacity = "0.8";
-        btnOut.textContent = saveSequence[0];
+        
+        let dots = 0;
         animInterval = setInterval(() => {
-            seqIndex = (seqIndex + 1) % saveSequence.length;
-            btnOut.textContent = saveSequence[seqIndex];
-        }, 600);
+            dots = (dots + 1) % 4;
+            btnOut.textContent = "Checking" + ".".repeat(dots);
+        }, 500);
     }
 
     try {
@@ -4215,7 +4214,7 @@ async function handleTimeOut() {
             return;
         }
 
-        // --- 2. Stop Animation BEFORE opening the Shift Report Modal ---
+        // --- 2. Stop initial animation BEFORE opening Modal ---
         if (btnOut) {
             clearInterval(animInterval);
             btnOut.textContent = "Time Out";
@@ -4223,42 +4222,38 @@ async function handleTimeOut() {
             btnOut.style.opacity = "1";
         }
 
-        // 3. Open the Modal and wait for them to click Submit
+        // --- 3. Open Modal and wait for user ---
         const reportData = await askForShiftReport(student.gcHandle, student.name);
 
-        const newLog = {
-            name: student.name,
-            id: student.id,
-            action: actionStr,
-            time: shift.realTimeStr,
-            date: shift.dateStr,
-            details: {
-                gcHandle: reportData.gc,
-                announcement: reportData.ann,
-                whoPosted: reportData.name
-            } 
-        };
+        // If user clicked the new Cancel button, gracefully abort!
+        if (!reportData) return; 
 
-        logs.push(newLog);
-        localStorage.setItem('attendanceLogs', JSON.stringify(logs));
-        localStorage.removeItem('activeDeviceStudent');
-        
-        // 4. Push to Supabase IN THE BACKGROUND while the Modal's animation runs
         try {
-            await pushLogsToCloud();
-            await new Promise(resolve => setTimeout(resolve, 1200));
-        } catch (e) {
-            console.error("Cloud push failed, but data is saved locally.", e);
-        } finally {
+            const newLog = {
+                name: student.name,
+                id: student.id,
+                action: actionStr,
+                time: shift.realTimeStr,
+                date: shift.dateStr,
+                details: {
+                    gcHandle: reportData.gc,
+                    announcement: reportData.ann,
+                    whoPosted: reportData.name
+                } 
+            };
+
+            logs.push(newLog);
+            localStorage.setItem('attendanceLogs', JSON.stringify(logs));
+            localStorage.removeItem('activeDeviceStudent');
             
-            // Clean up the Modal
-            if (reportData.animInterval) clearInterval(reportData.animInterval);
-            if (reportData.overlay && document.body.contains(reportData.overlay)) {
-                document.body.removeChild(reportData.overlay);
+            try {
+                await pushLogsToCloud();
+                await new Promise(resolve => setTimeout(resolve, 1000)); // Make the submit feel satisfying
+            } catch (e) {
+                console.error("Cloud push failed:", e);
             }
             
             checkDeviceLock(); 
-            
             messageEl.textContent = `Success: Shift Report submitted and Time Out recorded!`;
             messageEl.className = "message success";
             idInput.value = ''; 
@@ -4268,12 +4263,18 @@ async function handleTimeOut() {
                 if (typeof renderDashboardSummary === 'function') renderDashboardSummary();
                 if (typeof renderAttendanceSummary === 'function') renderAttendanceSummary();
             } catch(e) {}
+
+        } finally {
+            // --- 4. THE MASTER KILL SWITCH ---
+            // This guarantees the modal is destroyed instantly when the database finishes!
+            const modal = document.getElementById('shift-report-modal');
+            if (modal) modal.remove();
         }
 
     } catch (error) {
         console.error(error);
     } finally {
-        // --- Failsafe: Restore button if validation failed early ---
+        // Outer Failsafe: Restore main button just in case
         if (btnOut && btnOut.disabled) {
             clearInterval(animInterval);
             btnOut.textContent = "Time Out";
@@ -4285,6 +4286,10 @@ async function handleTimeOut() {
 
 function askForShiftReport(defaultGc) {
     return new Promise((resolve) => {
+        // Clear any old, stuck modals first
+        const existing = document.getElementById('shift-report-modal');
+        if (existing) existing.remove();
+
         const overlay = document.createElement('div');
         overlay.id = 'shift-report-modal';
         Object.assign(overlay.style, {
@@ -4327,13 +4332,22 @@ function askForShiftReport(defaultGc) {
                 <option value="Co-Online Support">Co-Online Support</option>
             </select>
             
-            <button id="rep-submit" style="width: 100%; padding: 14px; background: var(--accent, #66fcf1); color: #000; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; text-transform: uppercase; transition: 0.2s;">Submit & Time Out</button>
+            <div style="display: flex; gap: 10px;">
+                <button id="rep-cancel" style="flex: 1; padding: 14px; background: transparent; border: 1px solid #9ca3af; color: #9ca3af; border-radius: 6px; font-weight: bold; cursor: pointer; text-transform: uppercase; transition: 0.2s;">Cancel</button>
+                <button id="rep-submit" style="flex: 2; padding: 14px; background: var(--accent, #66fcf1); color: #000; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; text-transform: uppercase; transition: 0.2s;">Submit</button>
+            </div>
         `;
 
         overlay.appendChild(box);
         document.body.appendChild(overlay);
 
-        // --- THE UPDATED ONCLICK BEHAVIOR ---
+        // Cancel Button Action
+        document.getElementById('rep-cancel').onclick = () => {
+            overlay.remove();
+            resolve(null); // Returns null so the system knows they backed out
+        };
+
+        // Submit Button Action
         document.getElementById('rep-submit').onclick = () => {
             const gc = document.getElementById('rep-gc').value.trim();
             const name = document.getElementById('rep-name').value;
@@ -4345,29 +4359,21 @@ function askForShiftReport(defaultGc) {
                 return;
             }
 
-            // 1. Start Submitting Animation
             const submitBtn = document.getElementById('rep-submit');
-            let seqIndex = 0;
-            const saveSequence = [
-                "Submitting.", 
-                "Submitting..", 
-                "Submitting...",
-                "Submitting. (Please wait...)",
-                "Submitting.. (Please wait...)",
-                "Submitting... (Please wait...)"
-            ];
+            const cancelBtn = document.getElementById('rep-cancel');
             
+            cancelBtn.style.display = 'none'; // Hide cancel button so they can't break it
             submitBtn.disabled = true;
             submitBtn.style.opacity = "0.8";
-            submitBtn.textContent = saveSequence[0];
             
-            const animInterval = setInterval(() => {
-                seqIndex = (seqIndex + 1) % saveSequence.length;
-                submitBtn.textContent = saveSequence[seqIndex];
-            }, 600); // Cycles dots every 600ms
+            let dots = 0;
+            setInterval(() => {
+                dots = (dots + 1) % 4;
+                submitBtn.textContent = "Submitting" + ".".repeat(dots);
+            }, 500);
 
-            // 2. DO NOT remove the modal yet. Send the overlay and interval back to handleTimeOut!
-            resolve({ gc, ann, name, overlay, animInterval });
+            // Pass the data back instantly. The main function handles the cleanup now!
+            resolve({ gc, ann, name });
         };
     });
 }
