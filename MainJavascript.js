@@ -2018,7 +2018,7 @@ function renderLogs() {
             <td>
                 <div class="button-cell-wrap">
                     ${todayShiftBtn}
-                    <button class="remove-btn" onclick="deleteLog(${log.originalIndex})">REMOVE</button>
+                    <button class="remove-btn" onclick="deleteLog('${safeId}', '${log.date}')">REMOVE</button>
                 </div>
             </td>
         `;
@@ -2771,293 +2771,7 @@ function resetDevSettings() {
 }
 
 function renderMainDashboard() {
-    if(!isAuthenticated()) return;
-    try {
-        const students = JSON.parse(localStorage.getItem('students')) || [];
-        const validStudents = students.filter(s => s.id !== 'SYS_CONFIG_X99' && s.id !== 'SYS_WIPE_ALL');
-        const logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
-        const shift = getShiftDateDetails();
-        const todayStr = shift.dateStr;
-        const currentDay = shift.dayStr;
-
-        const dashTotal = document.getElementById('dash-total');
-        if(dashTotal) dashTotal.textContent = validStudents.length;
-
-        const scheduledToday = validStudents.filter(s => s.assignedDays && s.assignedDays.includes(currentDay));
-        const totalScheduled = scheduledToday.length;
-
-        let presentCount = 0;
-        let lateCount = 0;
-
-        scheduledToday.forEach(student => {
-            const studentTodayLogs = logs.filter(l => String(l.id) === String(student.id) && l.date === todayStr);
-            const timeInLog = studentTodayLogs.find(l => l.action.includes('Time In'));
-            
-            if (timeInLog) {
-                presentCount++;
-                if (timeInLog.action.includes('Late')) {
-                    lateCount++;
-                }
-            }
-        });
-
-        const absentCount = totalScheduled - presentCount;
-        const attendanceRate = totalScheduled > 0 ? Math.round((presentCount / totalScheduled) * 100) : 0;
-
-        const dashRatio = document.getElementById('dash-ratio');
-        const dashRate = document.getElementById('dash-rate');
-        const dashPresent = document.getElementById('dash-present');
-        const dashAbsent = document.getElementById('dash-absent');
-        const dashLate = document.getElementById('dash-late');
-        
-        if(dashRatio) dashRatio.textContent = `${presentCount} / ${totalScheduled}`;
-        if(dashRate) dashRate.textContent = `${attendanceRate}%`;
-        if(dashPresent) dashPresent.textContent = presentCount;
-        if(dashAbsent) dashAbsent.textContent = absentCount;
-        if(dashLate) dashLate.textContent = lateCount;
-
-        const pieChart = document.getElementById('dash-pie-chart');
-        if (totalScheduled > 0 && pieChart) {
-            const onTimeCount = presentCount - lateCount;
-            const onTimePct = (onTimeCount / totalScheduled) * 100;
-            const latePct = (lateCount / totalScheduled) * 100;
-            const combinedPresentPct = onTimePct + latePct; 
-            
-            pieChart.style.background = `conic-gradient(
-                var(--success) 0% ${onTimePct}%, 
-                #f59e0b ${onTimePct}% ${combinedPresentPct}%, 
-                var(--error) ${combinedPresentPct}% 100%
-            )`;
-        } else if (pieChart) {
-            pieChart.style.background = `conic-gradient(#334155 0% 100%)`;
-        }
-
-        const barChartEl = document.getElementById('dash-bar-chart');
-        const barLabelsEl = document.getElementById('dash-bar-labels');
-        if (barChartEl && barLabelsEl) {
-            barChartEl.innerHTML = '';
-            barLabelsEl.innerHTML = '';
-            
-            const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-            let maxPresent = 100; 
-            let weeklyData = [];
-            
-            for (let i = 6; i >= 0; i--) {
-                let d = new Date(getPHT());
-                d.setDate(d.getDate() - i);
-                let dStr = d.toLocaleDateString('en-US');
-                let dayIdx = d.getDay();
-                
-                let pCount = logs.filter(l => l.date === dStr && l.action.includes('Time In') && l.id !== 'SYS_DELETED_DATE').length;
-                weeklyData.push({ dayLabel: dayNames[dayIdx], count: pCount });
-            }
-            
-            weeklyData.forEach(data => {
-                let heightPct = (data.count / maxPresent) * 100;
-                if (heightPct > 100) heightPct = 100; 
-                if (heightPct < 5) heightPct = 5; 
-                
-                barChartEl.innerHTML += `
-                    <div style="flex: 1; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; position: relative;">
-                        <span style="position: absolute; top: -20px; font-size: 11px; color: var(--text-main); font-weight: bold;">${data.count}</span>
-                        <div style="width: 100%; max-width: 30px; height: ${heightPct}%; background: linear-gradient(180deg, var(--accent), transparent); border-radius: 4px 4px 0 0; transition: height 0.5s;"></div>
-                    </div>
-                `;
-                barLabelsEl.innerHTML += `<div style="flex: 1; text-align: center; font-weight: bold;">${data.dayLabel}</div>`;
-            });
-        }
-
-        const timeInLogs = logs.filter(l => l.date === todayStr && l.action.includes('Time In') && !l.action.includes('Exempted'));
-        const timeOutLogs = logs.filter(l => l.date === todayStr && l.action.includes('Time Out') && !l.action.includes('Exempted'));
-        
-        const hourlyInCounts = new Array(24).fill(0);
-        const hourlyOutCounts = new Array(24).fill(0);
-        
-        function populateCounts(targetLogs, arr) {
-            targetLogs.forEach(log => {
-                if(log.time === 'Exempted') return;
-                
-                const timeMatch = log.time.match(/(\d+):(\d+)(?::\d+)?\s+(AM|PM)/i);
-                
-                if (timeMatch) {
-                    let h = parseInt(timeMatch[1]);
-                    const ampm = timeMatch[3].toUpperCase();
-                    if (ampm === 'PM' && h !== 12) h += 12;
-                    if (ampm === 'AM' && h === 12) h = 0;
-                    
-                    if (h >= 0 && h < 24) {
-                        arr[h]++;
-                    }
-                }
-            });
-        }
-        
-        populateCounts(timeInLogs, hourlyInCounts);
-        populateCounts(timeOutLogs, hourlyOutCounts);
-
-        const maxLineVal = 25; 
-        const lineChartContainer = document.getElementById('dash-line-chart-container');
-        if (lineChartContainer) {
-            let svgHTML = `<svg width="100%" height="100%" viewBox="-40 -20 1080 260" preserveAspectRatio="none" style="flex: 1; display: block; overflow: visible;">`;
-            
-            for(let val = 0; val <= 25; val += 5) {
-                let yLine = 200 - ((val / maxLineVal) * 200);
-                svgHTML += `<line x1="0" y1="${yLine}" x2="1000" y2="${yLine}" stroke="rgba(255,255,255,0.1)" stroke-width="1.5" />`;
-                svgHTML += `<text x="-15" y="${yLine + 5}" fill="var(--text-muted)" font-size="14" font-weight="bold" text-anchor="end">${val}</text>`;
-            }
-
-            let shiftedInCounts = new Array(24).fill(0);
-            let shiftedOutCounts = new Array(24).fill(0);
-            
-            for(let h = 0; h < 24; h++) {
-                let chartIdx = (h >= 4) ? (h - 4) : (h + 20);
-                shiftedInCounts[chartIdx] = hourlyInCounts[h];
-                shiftedOutCounts[chartIdx] = hourlyOutCounts[h];
-            }
-
-            let inPoints = [];
-            shiftedInCounts.forEach((count, i) => {
-                let x = (i / 23) * 1000;
-                let c = Math.min(count, maxLineVal);
-                let y = 200 - ((c / maxLineVal) * 200);
-                inPoints.push(`${x},${y}`);
-            });
-
-            let outPoints = [];
-            shiftedOutCounts.forEach((count, i) => {
-                let x = (i / 23) * 1000;
-                let c = Math.min(count, maxLineVal);
-                let y = 200 - ((c / maxLineVal) * 200);
-                outPoints.push(`${x},${y}`);
-            });
-            
-            svgHTML += `<polyline points="${outPoints.join(' ')}" fill="none" stroke="var(--error)" stroke-width="3.5" />`;
-            svgHTML += `<polyline points="${inPoints.join(' ')}" fill="none" stroke="var(--accent)" stroke-width="3.5" />`;
-            
-            shiftedOutCounts.forEach((count, i) => {
-                let x = (i / 23) * 1000;
-                let c = Math.min(count, maxLineVal);
-                let y = 200 - ((c / maxLineVal) * 200);
-                svgHTML += `<circle cx="${x}" cy="${y}" r="6" fill="#1e2128" stroke="var(--error)" stroke-width="2.5" />`;
-                if (count > 0) {
-                    svgHTML += `<text x="${x}" y="${y + 20}" fill="var(--error)" font-size="12" text-anchor="middle" font-weight="bold">${count}</text>`;
-                }
-            });
-
-            shiftedInCounts.forEach((count, i) => {
-                let x = (i / 23) * 1000;
-                let c = Math.min(count, maxLineVal);
-                let y = 200 - ((c / maxLineVal) * 200);
-                svgHTML += `<circle cx="${x}" cy="${y}" r="6" fill="#1e2128" stroke="var(--accent)" stroke-width="2.5" />`;
-                if (count > 0) {
-                    svgHTML += `<text x="${x}" y="${y - 12}" fill="var(--accent)" font-size="12" text-anchor="middle" font-weight="bold">${count}</text>`;
-                }
-            });
-
-            svgHTML += `</svg>`;
-            
-            let labelsHTML = `<div style="display: flex; justify-content: space-between; margin-top: 15px; color: var(--text-muted); font-size: 11px; padding: 0;">`;
-            const lineLabels = ['4a','5a','6a','7a','8a','9a','10a','11a','12p','1p','2p','3p','4p','5p','6p','7p','8p','9p','10p','11p','12a','1a','2a','3a'];
-            lineLabels.forEach(lbl => {
-                labelsHTML += `<span style="flex: 1; text-align: center;">${lbl}</span>`;
-            });
-            labelsHTML += `</div>`;
-            
-            lineChartContainer.innerHTML = svgHTML + labelsHTML;
-        }
-
-        const cutoffDate = new Date(getPHT());
-        cutoffDate.setDate(cutoffDate.getDate() - 21); 
-        
-        const deadStudentsList = document.getElementById('dash-dead-students');
-        if (deadStudentsList) {
-            deadStudentsList.innerHTML = '';
-
-            let deadCount = 0;
-
-            validStudents.forEach(student => {
-                const recentLog = logs.find(l => String(l.id) === String(student.id) && new Date(l.date) >= cutoffDate);
-                if (!recentLog) {
-                    deadCount++;
-                    deadStudentsList.innerHTML += `<div style="padding: 12px 10px; border-bottom: 1px solid #2d313c; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0;">
-                        <span style="color: var(--text-main); font-size: 13px;">${student.name || 'Unknown'}</span> 
-                        <span style="color:var(--error); font-weight: bold; font-size: 10px;">INACTIVE</span>
-                    </div>`;
-                }
-            });
-            if (deadCount === 0) {
-                deadStudentsList.innerHTML = '<p class="placeholder-text" style="text-align: center; padding: 20px;">No inactive students.</p>';
-            }
-        }
-
-        let perfList = [];
-
-        validStudents.forEach(student => {
-            const studentLogs = logs.filter(l => String(l.id) === String(student.id));
-            if (studentLogs.length === 0) return;
-
-            let onTimeIn = 0;
-            let lateIn = 0;
-            let onTimeOut = 0;
-            let lateOut = 0;
-            let bonus = 0;
-
-            studentLogs.forEach(log => {
-                if (log.action === 'Time In') onTimeIn++;
-                if (log.action === 'Time In (Late)') lateIn++;
-                if (log.action === 'Time Out') onTimeOut++;
-                if (log.action === 'Time Out (Late)') lateOut++;
-                if (log.action.includes('Out') && log.details && log.details.announcement === 'Yes') {
-                    bonus += 1.5;
-                }
-            });
-
-            const totalActions = onTimeIn + lateIn + onTimeOut + lateOut;
-            const perfectActions = onTimeIn + onTimeOut;
-
-            let perfRate = 0;
-            if (totalActions > 0) {
-                perfRate = (perfectActions / totalActions) * 100;
-            }
-            perfRate += bonus;
-            if (perfRate > 100) perfRate = 100;
-
-            perfList.push({ name: student.name || 'Unknown', id: student.id, rate: Math.round(perfRate) });
-        });
-
-        perfList.sort((a, b) => b.rate - a.rate);
-        const top10 = perfList.slice(0, 10);
-
-        const bestPerfEl = document.getElementById('dash-best-perf');
-        if (bestPerfEl) {
-            bestPerfEl.innerHTML = '';
-            if (top10.length === 0) {
-                bestPerfEl.innerHTML = '<p class="placeholder-text" style="text-align: center; padding: 20px;">No data available.</p>';
-            } else {
-                top10.forEach((p, index) => {
-                    let color = p.rate >= 80 ? 'var(--success)' : (p.rate >= 50 ? '#f59e0b' : 'var(--error)');
-                    let rankBadge = '';
-                    if (index === 0) rankBadge = '🥇';
-                    else if (index === 1) rankBadge = '🥈';
-                    else if (index === 2) rankBadge = '🥉';
-                    else rankBadge = `<span style="display:inline-block; width:20px; text-align:center; font-weight:bold; color:var(--text-muted); font-size:11px;">#${index+1}</span>`;
-
-                    bestPerfEl.innerHTML += `
-                        <div style="padding: 10px; border-bottom: 1px solid #2d313c; display: flex; justify-content: space-between; align-items: center; border-radius: 4px; background: rgba(0,0,0,0.2); flex-shrink: 0;">
-                            <div style="display: flex; align-items: center; gap: 10px;">
-                                ${rankBadge}
-                                <div style="display: flex; flex-direction: column;">
-                                    <span style="color: var(--text-main); font-size: 13px; font-weight: bold;">${p.name}</span>
-                                    <span style="color: var(--text-muted); font-size: 10px;">ID: ${p.id}</span>
-                                </div>
-                            </div>
-                            <span style="color: ${color}; font-weight: bold; font-size: 14px;">${p.rate}%</span>
-                        </div>`;
-                });
-            }
-        }
-    } catch (e) {}
-    applyVisitorMode();
+    renderDashboardSummary(); // Keeps old button calls from breaking
 }
 
 function renderDashboardSummary() {
@@ -3074,6 +2788,7 @@ function renderDashboardSummary() {
     const total = validStudents.length;
 
     const scheduledStudents = validStudents.filter(s => s.assignedDays && s.assignedDays.includes(targetDayStr));
+    const totalScheduled = scheduledStudents.length;
     const todayLogs = logs.filter(l => l.date === todayStr);
 
     let present = 0;
@@ -3082,6 +2797,7 @@ function renderDashboardSummary() {
     let freshPresent = 0;
     let upperPresent = 0;
 
+    // 1. Calculate Core Stats
     scheduledStudents.forEach(s => {
         const studentLogs = todayLogs.filter(l => String(l.id) === String(s.id));
         const hasIn = studentLogs.some(l => l.action.includes('Time In') && !l.action.includes('Exempted'));
@@ -3092,79 +2808,227 @@ function renderDashboardSummary() {
             present++;
             if (isLate) late++;
             
-            // Count Present by Class Level
             const lvl = (s.classLevel || 'UpperClassmen').toLowerCase();
-            if (lvl === 'freshmen') {
-                freshPresent++;
-            } else {
-                upperPresent++;
-            }
+            if (lvl === 'freshmen') freshPresent++;
+            else upperPresent++;
         } else {
             absent++;
         }
     });
 
+    // 2. Update Top Number Cards
     if(document.getElementById('dash-total')) document.getElementById('dash-total').textContent = total;
-    if(document.getElementById('dash-ratio')) document.getElementById('dash-ratio').textContent = `${present} / ${scheduledStudents.length}`;
-    if(document.getElementById('dash-rate')) document.getElementById('dash-rate').textContent = scheduledStudents.length > 0 ? Math.round((present / scheduledStudents.length) * 100) + '%' : '0%';
+    if(document.getElementById('dash-ratio')) document.getElementById('dash-ratio').textContent = `${present} / ${totalScheduled}`;
+    if(document.getElementById('dash-rate')) document.getElementById('dash-rate').textContent = totalScheduled > 0 ? Math.round((present / totalScheduled) * 100) + '%' : '0%';
     if(document.getElementById('dash-present')) document.getElementById('dash-present').textContent = present;
     if(document.getElementById('dash-absent')) document.getElementById('dash-absent').textContent = absent;
     if(document.getElementById('dash-late')) document.getElementById('dash-late').textContent = late;
-    
     if(document.getElementById('dash-fresh-present')) document.getElementById('dash-fresh-present').textContent = freshPresent;
     if(document.getElementById('dash-upper-present')) document.getElementById('dash-upper-present').textContent = upperPresent;
 
+    // 3. Draw Pie Chart
+    const pieChart = document.getElementById('dash-pie-chart');
+    if (totalScheduled > 0 && pieChart) {
+        const onTimeCount = present - late;
+        const onTimePct = (onTimeCount / totalScheduled) * 100;
+        const latePct = (late / totalScheduled) * 100;
+        const combinedPresentPct = onTimePct + latePct; 
+        
+        pieChart.style.background = `conic-gradient(
+            var(--success) 0% ${onTimePct}%, 
+            #f59e0b ${onTimePct}% ${combinedPresentPct}%, 
+            var(--error) ${combinedPresentPct}% 100%
+        )`;
+    } else if (pieChart) {
+        pieChart.style.background = `conic-gradient(#334155 0% 100%)`;
+    }
+
+    // 4. Draw Weekly Bar Chart
+    const barChartEl = document.getElementById('dash-bar-chart');
+    const barLabelsEl = document.getElementById('dash-bar-labels');
+    if (barChartEl && barLabelsEl) {
+        barChartEl.innerHTML = '';
+        barLabelsEl.innerHTML = '';
+        
+        const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        let maxPresent = 100; 
+        
+        for (let i = 6; i >= 0; i--) {
+            let d = new Date(getPHT());
+            d.setDate(d.getDate() - i);
+            let dStr = d.toLocaleDateString('en-US');
+            let dayIdx = d.getDay();
+            
+            let pCount = logs.filter(l => l.date === dStr && (l.action.includes('Time In') || l.action.includes('Exempted')) && l.id !== 'SYS_DELETED_DATE').length;
+            
+            let heightPct = (pCount / maxPresent) * 100;
+            if (heightPct > 100) heightPct = 100; 
+            if (heightPct < 5) heightPct = 5; 
+            
+            barChartEl.innerHTML += `
+                <div style="flex: 1; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; position: relative;">
+                    <span style="position: absolute; top: -20px; font-size: 11px; color: var(--text-main); font-weight: bold;">${pCount}</span>
+                    <div style="width: 100%; max-width: 30px; height: ${heightPct}%; background: linear-gradient(180deg, var(--accent), transparent); border-radius: 4px 4px 0 0; transition: height 0.5s;"></div>
+                </div>
+            `;
+            barLabelsEl.innerHTML += `<div style="flex: 1; text-align: center; font-weight: bold;">${dayNames[dayIdx]}</div>`;
+        }
+    }
+
+    // 5. Draw Hourly Trend Line Chart
+    const timeInLogs = todayLogs.filter(l => l.action.includes('Time In') && !l.action.includes('Exempted'));
+    const timeOutLogs = todayLogs.filter(l => l.action.includes('Time Out') && !l.action.includes('Exempted'));
+    
+    const hourlyInCounts = new Array(24).fill(0);
+    const hourlyOutCounts = new Array(24).fill(0);
+    
+    const populateCounts = (targetLogs, arr) => {
+        targetLogs.forEach(log => {
+            if(log.time === 'Exempted') return;
+            const timeMatch = log.time.match(/(\d+):(\d+)(?::\d+)?\s+(AM|PM)/i);
+            if (timeMatch) {
+                let h = parseInt(timeMatch[1]);
+                const ampm = timeMatch[3].toUpperCase();
+                if (ampm === 'PM' && h !== 12) h += 12;
+                if (ampm === 'AM' && h === 12) h = 0;
+                if (h >= 0 && h < 24) arr[h]++;
+            }
+        });
+    };
+    
+    populateCounts(timeInLogs, hourlyInCounts);
+    populateCounts(timeOutLogs, hourlyOutCounts);
+
+    const lineChartContainer = document.getElementById('dash-line-chart-container');
+    if (lineChartContainer) {
+        const maxLineVal = 25; 
+        let svgHTML = `<svg width="100%" height="100%" viewBox="-40 -20 1080 260" preserveAspectRatio="none" style="flex: 1; display: block; overflow: visible;">`;
+        
+        for(let val = 0; val <= 25; val += 5) {
+            let yLine = 200 - ((val / maxLineVal) * 200);
+            svgHTML += `<line x1="0" y1="${yLine}" x2="1000" y2="${yLine}" stroke="rgba(255,255,255,0.1)" stroke-width="1.5" />`;
+            svgHTML += `<text x="-15" y="${yLine + 5}" fill="var(--text-muted)" font-size="14" font-weight="bold" text-anchor="end">${val}</text>`;
+        }
+
+        let inPoints = []; let outPoints = [];
+        let inCircles = ''; let outCircles = '';
+        
+        for(let h = 0; h < 24; h++) {
+            let chartIdx = (h >= 4) ? (h - 4) : (h + 20);
+            let inCount = hourlyInCounts[h];
+            let outCount = hourlyOutCounts[h];
+            let x = (chartIdx / 23) * 1000;
+            
+            let inY = 200 - ((Math.min(inCount, maxLineVal) / maxLineVal) * 200);
+            let outY = 200 - ((Math.min(outCount, maxLineVal) / maxLineVal) * 200);
+            
+            inPoints.push(`${x},${inY}`);
+            outPoints.push(`${x},${outY}`);
+            
+            outCircles += `<circle cx="${x}" cy="${outY}" r="6" fill="#1e2128" stroke="var(--error)" stroke-width="2.5" />`;
+            if (outCount > 0) outCircles += `<text x="${x}" y="${outY + 20}" fill="var(--error)" font-size="12" text-anchor="middle" font-weight="bold">${outCount}</text>`;
+            
+            inCircles += `<circle cx="${x}" cy="${inY}" r="6" fill="#1e2128" stroke="var(--accent)" stroke-width="2.5" />`;
+            if (inCount > 0) inCircles += `<text x="${x}" y="${inY - 12}" fill="var(--accent)" font-size="12" text-anchor="middle" font-weight="bold">${inCount}</text>`;
+        }
+
+        svgHTML += `<polyline points="${outPoints.join(' ')}" fill="none" stroke="var(--error)" stroke-width="3.5" />`;
+        svgHTML += `<polyline points="${inPoints.join(' ')}" fill="none" stroke="var(--accent)" stroke-width="3.5" />`;
+        svgHTML += outCircles + inCircles + `</svg>`;
+        
+        let labelsHTML = `<div style="display: flex; justify-content: space-between; margin-top: 15px; color: var(--text-muted); font-size: 11px; padding: 0;">`;
+        ['4a','5a','6a','7a','8a','9a','10a','11a','12p','1p','2p','3p','4p','5p','6p','7p','8p','9p','10p','11p','12a','1a','2a','3a'].forEach(lbl => {
+            labelsHTML += `<span style="flex: 1; text-align: center;">${lbl}</span>`;
+        });
+        
+        lineChartContainer.innerHTML = svgHTML + labelsHTML + `</div>`;
+    }
+
+    // 6. Draw Inactive Students List
     const inactiveFreshmen = [];
     const inactiveUpper = [];
+    const cutoffDate = new Date(getPHT());
+    cutoffDate.setDate(cutoffDate.getDate() - 21);
 
     validStudents.forEach(s => {
         const sLogs = logs.filter(l => String(l.id) === String(s.id));
         let daysInactive = 999; 
-        
         if (sLogs.length > 0) {
             const sortedLogs = sLogs.sort((a, b) => new Date(b.date) - new Date(a.date));
-            const lastLogDate = new Date(sortedLogs[0].date).getTime();
-            daysInactive = Math.floor((now - lastLogDate) / (1000 * 60 * 60 * 24));
+            daysInactive = Math.floor((now - new Date(sortedLogs[0].date).getTime()) / (1000 * 60 * 60 * 24));
         }
 
         if (daysInactive >= 8) {
             const classLvl = (s.classLevel || 'UpperClassmen').toLowerCase();
-            const displayDays = daysInactive >= 999 ? "No logs" : `${daysInactive} days`;
-            const obj = { name: s.name || 'Unknown', days: displayDays };
-            
-            if (classLvl === 'freshmen') {
-                inactiveFreshmen.push(obj);
-            } else {
-                inactiveUpper.push(obj);
-            }
+            const obj = { name: s.name || 'Unknown', days: daysInactive >= 999 ? "No logs" : `${daysInactive} days` };
+            if (classLvl === 'freshmen') inactiveFreshmen.push(obj); else inactiveUpper.push(obj);
         }
     });
 
     const renderInactive = (id, list) => {
         const container = document.getElementById(id);
         if (!container) return;
-        container.innerHTML = '';
-        if (list.length === 0) {
-            container.innerHTML = '<span style="font-size: 11px; color: var(--text-muted);">None</span>';
-            return;
-        }
+        container.innerHTML = list.length === 0 ? '<span style="font-size: 11px; color: var(--text-muted);">None</span>' : '';
         list.forEach(item => {
             container.innerHTML += `
                 <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); padding: 6px 8px; border-radius: 4px; display: flex; justify-content: space-between; align-items: center;">
                     <span style="font-size: 10px; color: var(--text-main); font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 90px;" title="${item.name}">${item.name}</span>
                     <span style="font-size: 9px; color: #ef4444; font-weight: bold; flex-shrink: 0; background: rgba(239,68,68,0.1); padding: 2px 4px; border-radius: 3px;">${item.days}</span>
-                </div>
-            `;
+                </div>`;
         });
     };
-
     renderInactive('dash-inactive-freshmen', inactiveFreshmen);
     renderInactive('dash-inactive-upper', inactiveUpper);
 
-    try {
-        if(typeof renderDashboardCharts === 'function') renderDashboardCharts(present, absent, scheduledStudents.length, logs, todayStr);
-        if(typeof renderTopPerformance === 'function') renderTopPerformance(validStudents, logs);
-    } catch(e) {}
+    // 7. Draw Top 10 Best Performance
+    let perfList = [];
+    validStudents.forEach(student => {
+        const studentLogs = logs.filter(l => String(l.id) === String(student.id));
+        if (studentLogs.length === 0) return;
+
+        let onTimeIn = 0; let lateIn = 0; let onTimeOut = 0; let lateOut = 0; let bonus = 0;
+
+        studentLogs.forEach(log => {
+            if (log.action === 'Time In') onTimeIn++;
+            if (log.action === 'Time In (Late)') lateIn++;
+            if (log.action === 'Time Out') onTimeOut++;
+            if (log.action === 'Time Out (Late)') lateOut++;
+            if (log.action.includes('Out') && log.details && log.details.announcement === 'Yes') bonus += 1.5;
+        });
+
+        const totalActions = onTimeIn + lateIn + onTimeOut + lateOut;
+        let perfRate = totalActions > 0 ? (onTimeIn + onTimeOut) / totalActions * 100 : 0;
+        perfRate = Math.min(perfRate + bonus, 100);
+
+        perfList.push({ name: student.name || 'Unknown', id: student.id, rate: Math.round(perfRate) });
+    });
+
+    perfList.sort((a, b) => b.rate - a.rate);
+    const bestPerfEl = document.getElementById('dash-best-perf');
+    
+    if (bestPerfEl) {
+        bestPerfEl.innerHTML = '';
+        if (perfList.length === 0) {
+            bestPerfEl.innerHTML = '<p class="placeholder-text" style="text-align: center; padding: 20px;">No data available.</p>';
+        } else {
+            perfList.slice(0, 10).forEach((p, index) => {
+                let color = p.rate >= 80 ? 'var(--success)' : (p.rate >= 50 ? '#f59e0b' : 'var(--error)');
+                let rankBadge = ['🥇', '🥈', '🥉'][index] || `<span style="display:inline-block; width:20px; text-align:center; font-weight:bold; color:var(--text-muted); font-size:11px;">#${index+1}</span>`;
+
+                bestPerfEl.innerHTML += `
+                    <div style="padding: 10px; border-bottom: 1px solid #2d313c; display: flex; justify-content: space-between; align-items: center; border-radius: 4px; background: rgba(0,0,0,0.2); flex-shrink: 0;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            ${rankBadge}
+                            <div style="display: flex; flex-direction: column;">
+                                <span style="color: var(--text-main); font-size: 13px; font-weight: bold;">${p.name}</span>
+                                <span style="color: var(--text-muted); font-size: 10px;">ID: ${p.id}</span>
+                            </div>
+                        </div>
+                        <span style="color: ${color}; font-weight: bold; font-size: 14px;">${p.rate}%</span>
+                    </div>`;
+            });
+        }
+    }
 }
 
 
