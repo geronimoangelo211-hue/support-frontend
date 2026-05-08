@@ -1874,6 +1874,9 @@ function switchAdminSection(sectionId, element) {
     const targetSec = document.getElementById(sectionId);
     if (targetSec) targetSec.classList.add('active');
 
+    // 🟢 THIS IS THE MISSING PIECE! Save the current tab to memory 🟢
+    sessionStorage.setItem('currentAdminSec', sectionId);
+
     if (sectionId === 'sec-settings') {
         settingsClickCount++;
         
