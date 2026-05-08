@@ -163,19 +163,15 @@ input:focus, select:focus {
 
 .portal-mascot {
     position: absolute;
-    top: -20%;                
-    left: 30%;
-    transform: translate(-50%, -60%); 
-    height: clamp(100px, 20vw, 160px); 
+    top: -25%;                
+    left: 27%;
+    
+    transform: translate(-50%, calc(-100% + 50px)); 
+    
+    height: clamp(110px, 25vw, 160px); 
+    
     z-index: -1;  
-
-    animation: floatIn 0.5s ease-out forwards;
-}
-
-.mascot {
-  position: absolute;
-  top: 10px;   
-  right: 20px;  
+    animation: floatIn 0.5s ease-out forwards; 
 }
 
 .centered-panel {
@@ -882,4 +878,22 @@ th {
     margin-top: 4px;
     display: none;
     text-align: center;
+}
+
+.live-spinner {
+    border: 3px solid rgba(0, 0, 0, 0.1);
+    border-top: 3px solid var(--primary); /* Uses your system's primary color */
+    border-radius: 50%;
+    width: 20px;
+    height: 20px;
+    animation: spin 1s linear infinite;
+    display: inline-block;
+    vertical-align: middle;
+    margin-left: 12px;
+}
+
+/* If you don't already have the spin animation defined from earlier: */
+@keyframes spin { 
+    0% { transform: rotate(0deg); } 
+    100% { transform: rotate(360deg); } 
 }
