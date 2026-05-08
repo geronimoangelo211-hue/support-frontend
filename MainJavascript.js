@@ -905,6 +905,10 @@ function closeEditStudentModal() {
 
 async function saveStudentEdit() {
     if(!isAuthenticated()) return;
+    
+    // 1. Lock the background sync immediately!
+    lastDataPushTime = Date.now(); 
+
     const origId = document.getElementById('edit-stu-orig-id').value;
     const newName = document.getElementById('edit-stu-name').value.trim();
     const newId = document.getElementById('edit-stu-id').value.trim();
@@ -923,7 +927,6 @@ async function saveStudentEdit() {
     let students = JSON.parse(localStorage.getItem('students')) || [];
     let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
 
-    // Stop them from taking someone else's ID
     if (origId !== newId && students.some(s => String(s.id) === newId)) {
         alert("This Student ID is already in use by another student.");
         return;
@@ -934,10 +937,11 @@ async function saveStudentEdit() {
         students[studentIndex].name = newName;
         students[studentIndex].id = newId;
         students[studentIndex].classLevel = newClass;
-        students[studentIndex].tag = newGc;
+        // FIX: Was mistakenly written as .tag in old code. Must be .gcHandle
+        students[studentIndex].gcHandle = newGc; 
     }
 
-    // Cascade ID changes so they don't lose their attendance history!
+    // Cascade ID changes to history logs
     logs.forEach(l => {
         if (String(l.id) === origId) {
             l.id = newId;
@@ -948,15 +952,12 @@ async function saveStudentEdit() {
     localStorage.setItem('students', JSON.stringify(students));
     localStorage.setItem('attendanceLogs', JSON.stringify(logs));
     
+    // 2. Push to Supabase
     await pushLogsToCloud();
     
+    // 3. Close Modal & Instant Auto-Refresh!
     closeEditStudentModal();
-    renderStudents();
-    renderSchedule();
-    renderDashboardSummary();
-    
-    const activeDate = document.getElementById('history-table-title')?.getAttribute('data-date');
-    if (activeDate) renderHistoryTable(activeDate);
+    forceInstantUIRefresh();
 }
 
 async function deleteStudent(idNum) {
@@ -1283,6 +1284,9 @@ async function createManualHistoryDate() {
         return;
     }
     
+    // 1. Lock the background sync immediately!
+    lastDataPushTime = Date.now();
+
     await pullFromCloud();
     let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
     
@@ -1307,17 +1311,18 @@ async function createManualHistoryDate() {
 
     logs.push(initLog);
     
-    // Save to local browser memory
     localStorage.setItem('attendanceLogs', JSON.stringify(logs));
     
-    // FIX: Removed the dead API calls and connected it to the Master Cloud Sync Engine
+    // 2. Push to Supabase
     try {
         await pushLogsToCloud();
     } catch(e) {
         console.error("Failed to push new Date Card to the cloud", e);
     }
 
+    // 3. Instant Auto-Refresh UI!
     renderHistoryView();
+    forceInstantUIRefresh();
     alert(`Date Card for ${dateStr} created successfully!`);
 }
 
@@ -3643,6 +3648,9 @@ function closeEditLogModal() {
 async function saveEditLogModal() {
     if(!isAuthenticated()) return;
 
+    // 1. Lock the background sync immediately!
+    lastDataPushTime = Date.now(); 
+
     const idNum = document.getElementById('edit-log-id').value;
     const dateStr = document.getElementById('edit-log-date').value;
     
@@ -3667,7 +3675,6 @@ async function saveEditLogModal() {
         alert("Invalid Time Out format. Use HH:MM:SS AM/PM (e.g., 05:00:00 PM)");
         return;
     }
-
 
     let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
     const students = JSON.parse(localStorage.getItem('students')) || [];
@@ -3729,11 +3736,12 @@ async function saveEditLogModal() {
 
     localStorage.setItem('attendanceLogs', JSON.stringify(logs));
     
+    // 2. Push to Supabase
     try { await pushLogsToCloud(); } catch(e) { console.error("Cloud push failed:", e); }
     
-    renderHistoryTable(dateStr);
-    renderMainDashboard();
+    // 3. Close Modal & Instant Auto-Refresh!
     closeEditLogModal();
+    forceInstantUIRefresh();
 }
 
 async function sendHeartbeat() {
@@ -4381,7 +4389,6 @@ function updateDailyMascot() {
 }
 
 function forceInstantUIRefresh() {
-    // Only refresh the admin tables if the admin view is currently open
     if (document.getElementById('admin-dashboard-view').classList.contains('active')) {
         if (typeof renderStudents === 'function') renderStudents();
         if (typeof renderSchedule === 'function') renderSchedule();
