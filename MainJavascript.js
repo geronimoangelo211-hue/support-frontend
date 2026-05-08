@@ -1445,22 +1445,30 @@ async function factoryReset() {
 }
 
 async function handleTimeIn() {
-    // --- 1. Prevent Double Clicks & Start Animation ---
     const btnIn = document.querySelector('.btn-in');
-    let seqIndex = 0;
     let animInterval;
-    const saveSequence = ["Submitting.", "Submitting..", "Submitting..."];
 
+    // --- 1. Lock Button & Animate ---
     if (btnIn) {
-        if (btnIn.disabled) return; // Locks the button so it only triggers ONCE
+        if (btnIn.disabled) return;
         btnIn.disabled = true;
         btnIn.style.opacity = "0.8";
-        btnIn.textContent = saveSequence[0];
+        let dots = 0;
         animInterval = setInterval(() => {
-            seqIndex = (seqIndex + 1) % saveSequence.length;
-            btnIn.textContent = saveSequence[seqIndex];
-        }, 600);
+            dots = (dots + 1) % 4;
+            btnIn.textContent = "CHECKING" + ".".repeat(dots);
+        }, 500);
     }
+
+    // Helper function to explicitly unlock the button
+    const stopAnim = () => {
+        if (btnIn) {
+            clearInterval(animInterval);
+            btnIn.textContent = "Time In";
+            btnIn.disabled = false;
+            btnIn.style.opacity = "1";
+        }
+    };
 
     try {
         await pullFromCloud();
@@ -1468,12 +1476,13 @@ async function handleTimeIn() {
         const idInput = document.getElementById('student-id-input'); 
         const messageEl = document.getElementById('student-message');
 
-        if (!idInput || !messageEl) return;
+        if (!idInput || !messageEl) { stopAnim(); return; }
         const studentId = idInput.value.trim();
 
         if (!studentId) {
             messageEl.textContent = "Please enter your Student ID Number.";
             messageEl.className = "message error";
+            stopAnim(); // 🟢 INSTANT UNLOCK
             return;
         }
 
@@ -1482,16 +1491,19 @@ async function handleTimeIn() {
         if (timeWindow === "TOO_EARLY") {
             messageEl.textContent = "Shift has not started yet. Time In opens at 5:00 AM.";
             messageEl.className = "message error";
+            stopAnim(); // 🟢 INSTANT UNLOCK
             return;
         }
         if (timeWindow === "LOCKOUT") {
             messageEl.textContent = "System Locked (12:01 PM - 4:59 PM). If you missed Time In, you are marked Absent.";
             messageEl.className = "message error";
+            stopAnim(); // 🟢 INSTANT UNLOCK
             return;
         }
         if (timeWindow === "TIME_OUT_NORMAL" || timeWindow === "TIME_OUT_LATE") {
             messageEl.textContent = "Time In is closed for this shift. It is currently the Time Out period.";
             messageEl.className = "message error";
+            stopAnim(); // 🟢 INSTANT UNLOCK
             return;
         }
 
@@ -1509,12 +1521,14 @@ async function handleTimeIn() {
         if (!student) {
             messageEl.textContent = "Student ID not found. Please register first.";
             messageEl.className = "message error";
+            stopAnim(); // 🟢 INSTANT UNLOCK
             return;
         }
 
         if (!student.assignedDays || !student.assignedDays.includes(shift.dayStr)) {
             messageEl.textContent = `You are not scheduled for duty today (${shift.dayStr}).`;
             messageEl.className = "message error";
+            stopAnim(); // 🟢 INSTANT UNLOCK
             return;
         }
 
@@ -1527,6 +1541,7 @@ async function handleTimeIn() {
         if (alreadyTimedIn) {
             messageEl.textContent = "You have already timed in for this shift.";
             messageEl.className = "message error";
+            stopAnim(); // 🟢 INSTANT UNLOCK
             return;
         }
 
@@ -1548,7 +1563,6 @@ async function handleTimeIn() {
         messageEl.className = "message success";
         idInput.value = ''; 
 
-        // 2. Push to Supabase and wait a tiny bit so the animation feels natural
         await pushLogsToCloud();
         await new Promise(resolve => setTimeout(resolve, 800));
 
@@ -1560,16 +1574,11 @@ async function handleTimeIn() {
             if (typeof renderAttendanceSummary === 'function') renderAttendanceSummary();
         } catch(e) {}
 
+        stopAnim(); // 🟢 Final Unlock after success!
+
     } catch (error) {
         console.error(error);
-    } finally {
-        // --- 3. Stop Animation & Restore Button automatically ---
-        if (btnIn) {
-            clearInterval(animInterval);
-            btnIn.textContent = "Time In";
-            btnIn.disabled = false;
-            btnIn.style.opacity = "1";
-        }
+        stopAnim(); // 🟢 Failsafe Unlock
     }
 }
 
@@ -4138,18 +4147,27 @@ async function handleTimeOut() {
     const btnOut = document.querySelector('.btn-out');
     let animInterval;
     
-    // --- 1. Lock Main Button & Animate ---
+    // --- 1. Lock Button & Animate ---
     if (btnOut) {
         if (btnOut.disabled) return; 
         btnOut.disabled = true;
         btnOut.style.opacity = "0.8";
-        
         let dots = 0;
         animInterval = setInterval(() => {
             dots = (dots + 1) % 4;
-            btnOut.textContent = "Checking" + ".".repeat(dots);
+            btnOut.textContent = "CHECKING" + ".".repeat(dots);
         }, 500);
     }
+
+    // Helper function to explicitly unlock the button
+    const stopAnim = () => {
+        if (btnOut) {
+            clearInterval(animInterval);
+            btnOut.textContent = "Time Out";
+            btnOut.disabled = false;
+            btnOut.style.opacity = "1";
+        }
+    };
 
     try {
         await pullFromCloud();
@@ -4157,12 +4175,13 @@ async function handleTimeOut() {
         const idInput = document.getElementById('student-id-input'); 
         const messageEl = document.getElementById('student-message');
 
-        if (!idInput || !messageEl) return;
+        if (!idInput || !messageEl) { stopAnim(); return; }
         const studentId = idInput.value.trim();
 
         if (!studentId) {
             messageEl.textContent = "Please enter your Student ID Number.";
             messageEl.className = "message error";
+            stopAnim(); // 🟢 INSTANT UNLOCK
             return;
         }
 
@@ -4171,11 +4190,13 @@ async function handleTimeOut() {
         if (timeWindow === "LOCKOUT") {
             messageEl.textContent = "System Locked (12:01 PM - 4:59 PM). Time Out opens at 5:00 PM.";
             messageEl.className = "message error";
+            stopAnim(); // 🟢 INSTANT UNLOCK
             return;
         }
         if (timeWindow === "TIME_IN_NORMAL" || timeWindow === "TIME_IN_LATE" || timeWindow === "TOO_EARLY") {
             messageEl.textContent = "It is too early to Time Out. Time Out opens at 5:00 PM.";
             messageEl.className = "message error";
+            stopAnim(); // 🟢 INSTANT UNLOCK
             return;
         }
 
@@ -4191,12 +4212,14 @@ async function handleTimeOut() {
         if (!student) {
             messageEl.textContent = "Student ID not found. Please register first.";
             messageEl.className = "message error";
+            stopAnim(); // 🟢 INSTANT UNLOCK
             return;
         }
 
         if (!student.assignedDays || !student.assignedDays.includes(shift.dayStr)) {
             messageEl.textContent = `You are not scheduled for duty today (${shift.dayStr}).`;
             messageEl.className = "message error";
+            stopAnim(); // 🟢 INSTANT UNLOCK
             return;
         }
 
@@ -4204,6 +4227,7 @@ async function handleTimeOut() {
         if (!hasTimedIn) {
             messageEl.textContent = "You cannot Time Out because you have no Time In record for today.";
             messageEl.className = "message error";
+            stopAnim(); // 🟢 INSTANT UNLOCK
             return;
         }
 
@@ -4211,22 +4235,16 @@ async function handleTimeOut() {
         if (alreadyTimedOut) {
             messageEl.textContent = "You have already timed out for this shift.";
             messageEl.className = "message error";
+            stopAnim(); // 🟢 INSTANT UNLOCK
             return;
         }
 
-        // --- 2. Stop initial animation BEFORE opening Modal ---
-        if (btnOut) {
-            clearInterval(animInterval);
-            btnOut.textContent = "Time Out";
-            btnOut.disabled = false;
-            btnOut.style.opacity = "1";
-        }
+        // Validation passed! Stop checking animation before opening modal.
+        stopAnim();
 
-        // --- 3. Open Modal and wait for user ---
+        // --- Open Modal and wait for user ---
         const reportData = await askForShiftReport(student.gcHandle, student.name);
-
-        // If user clicked the new Cancel button, gracefully abort!
-        if (!reportData) return; 
+        if (!reportData) return; // User clicked cancel
 
         try {
             const newLog = {
@@ -4248,7 +4266,7 @@ async function handleTimeOut() {
             
             try {
                 await pushLogsToCloud();
-                await new Promise(resolve => setTimeout(resolve, 1000)); // Make the submit feel satisfying
+                await new Promise(resolve => setTimeout(resolve, 1000));
             } catch (e) {
                 console.error("Cloud push failed:", e);
             }
@@ -4265,22 +4283,14 @@ async function handleTimeOut() {
             } catch(e) {}
 
         } finally {
-            // --- 4. THE MASTER KILL SWITCH ---
-            // This guarantees the modal is destroyed instantly when the database finishes!
+            // The master kill switch for the modal overlay
             const modal = document.getElementById('shift-report-modal');
             if (modal) modal.remove();
         }
 
     } catch (error) {
         console.error(error);
-    } finally {
-        // Outer Failsafe: Restore main button just in case
-        if (btnOut && btnOut.disabled) {
-            clearInterval(animInterval);
-            btnOut.textContent = "Time Out";
-            btnOut.disabled = false;
-            btnOut.style.opacity = "1";
-        }
+        stopAnim(); // 🟢 Failsafe Unlock
     }
 }
 
