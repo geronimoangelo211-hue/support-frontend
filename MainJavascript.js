@@ -4172,8 +4172,10 @@ async function handleTimeOut() {
         return;
     }
 
+    // 1. Open the Modal and wait for them to click Submit
     const reportData = await askForShiftReport(student.gcHandle, student.name);
 
+    // 2. Build the new log
     const newLog = {
         name: student.name,
         id: student.id,
@@ -4189,25 +4191,35 @@ async function handleTimeOut() {
 
     logs.push(newLog);
     localStorage.setItem('attendanceLogs', JSON.stringify(logs));
-    
     localStorage.removeItem('activeDeviceStudent');
-    checkDeviceLock();
     
-    messageEl.textContent = `Success: Shift Report submitted and Time Out recorded!`;
-    messageEl.className = "message success";
-    idInput.value = ''; 
-
+    // 3. Push to Supabase IN THE BACKGROUND while the animation runs
     try {
         await pushLogsToCloud();
+        // Give the animation 1.2 seconds to be satisfying to the user
+        await new Promise(resolve => setTimeout(resolve, 1200));
     } catch (e) {
         console.error("Cloud push failed, but data is saved locally.", e);
-    }
+    } finally {
+        
+        // 4. Clean up the Modal and Animation
+        if (reportData.animInterval) clearInterval(reportData.animInterval);
+        if (reportData.overlay && document.body.contains(reportData.overlay)) {
+            document.body.removeChild(reportData.overlay);
+        }
+        
+        checkDeviceLock(); 
+        
+        messageEl.textContent = `Success: Shift Report submitted and Time Out recorded!`;
+        messageEl.className = "message success";
+        idInput.value = ''; 
 
-    try {
-        if (typeof renderAttendanceLogs === 'function') renderAttendanceLogs();
-        if (typeof renderDashboardSummary === 'function') renderDashboardSummary();
-        if (typeof renderAttendanceSummary === 'function') renderAttendanceSummary();
-    } catch(e) {}
+        try {
+            if (typeof renderAttendanceLogs === 'function') renderAttendanceLogs();
+            if (typeof renderDashboardSummary === 'function') renderDashboardSummary();
+            if (typeof renderAttendanceSummary === 'function') renderAttendanceSummary();
+        } catch(e) {}
+    }
 }
 
 function askForShiftReport(defaultGc) {
@@ -4232,11 +4244,9 @@ function askForShiftReport(defaultGc) {
             <h3 style="color: var(--accent, #66fcf1); margin-top: 0; text-align: center;">End of Shift Report</h3>
             <p style="font-size: 12px; color: #9ca3af; text-align: center; margin-bottom: 20px;">Please provide your final shift details to complete your Time Out.</p>
             
-            <!-- 1. Input Bar for GC Handle -->
             <label style="display: block; font-size: 12px; font-weight: bold; margin-bottom: 5px;">GC Handle:</label>
             <input type="text" id="rep-gc" value="${defaultGc || ''}" style="width: 100%; padding: 10px; margin-bottom: 15px; background: #121419; border: 1px solid #333a45; color: white; border-radius: 6px; box-sizing: border-box; outline: none;">
             
-            <!-- 2. Circle Buttons (Radio) for Announcement -->
             <label style="display: block; font-size: 12px; font-weight: bold; margin-bottom: 8px;">Announcement:</label>
             <div style="display: flex; gap: 20px; margin-bottom: 20px; background: #121419; padding: 10px; border: 1px solid #333a45; border-radius: 6px;">
                 <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 14px;">
@@ -4247,7 +4257,6 @@ function askForShiftReport(defaultGc) {
                 </label>
             </div>
             
-            <!-- 3. Dropdown for Posted By -->
             <label style="display: block; font-size: 12px; font-weight: bold; margin-bottom: 5px;">Posted By / Status:</label>
             <select id="rep-name" style="width: 100%; padding: 10px; margin-bottom: 25px; background: #121419; border: 1px solid #333a45; color: white; border-radius: 6px; box-sizing: border-box; outline: none; cursor: pointer; font-size: 13px;">
                 <option value="" disabled selected>-- Select an option --</option>
@@ -4263,10 +4272,10 @@ function askForShiftReport(defaultGc) {
         overlay.appendChild(box);
         document.body.appendChild(overlay);
 
+        // --- THE UPDATED ONCLICK BEHAVIOR ---
         document.getElementById('rep-submit').onclick = () => {
             const gc = document.getElementById('rep-gc').value.trim();
             const name = document.getElementById('rep-name').value;
-            
             const annRadio = document.querySelector('input[name="rep-ann"]:checked');
             const ann = annRadio ? annRadio.value : '';
             
@@ -4275,8 +4284,29 @@ function askForShiftReport(defaultGc) {
                 return;
             }
 
-            document.body.removeChild(overlay);
-            resolve({ gc, ann, name });
+            // 1. Start Submitting Animation
+            const submitBtn = document.getElementById('rep-submit');
+            let seqIndex = 0;
+            const saveSequence = [
+                "Submitting.", 
+                "Submitting..", 
+                "Submitting...",
+                "Submitting. (Please wait...)",
+                "Submitting.. (Please wait...)",
+                "Submitting... (Please wait...)"
+            ];
+            
+            submitBtn.disabled = true;
+            submitBtn.style.opacity = "0.8";
+            submitBtn.textContent = saveSequence[0];
+            
+            const animInterval = setInterval(() => {
+                seqIndex = (seqIndex + 1) % saveSequence.length;
+                submitBtn.textContent = saveSequence[seqIndex];
+            }, 600); // Cycles dots every 600ms
+
+            // 2. DO NOT remove the modal yet. Send the overlay and interval back to handleTimeOut!
+            resolve({ gc, ann, name, overlay, animInterval });
         };
     });
 }
