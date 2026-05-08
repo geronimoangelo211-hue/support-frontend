@@ -906,58 +906,81 @@ function closeEditStudentModal() {
 async function saveStudentEdit() {
     if(!isAuthenticated()) return;
     
-    // 1. Lock the background sync immediately!
-    lastDataPushTime = Date.now(); 
+    // --- 1. Start "Saving..." Animation ---
+    const saveBtn = document.querySelector('#edit-student-modal .btn-primary');
+    let dotCount = 0;
+    let animInterval;
 
-    const origId = document.getElementById('edit-stu-orig-id').value;
-    const newName = document.getElementById('edit-stu-name').value.trim();
-    const newId = document.getElementById('edit-stu-id').value.trim();
-    const newClass = document.getElementById('edit-stu-class').value;
-    let newGc = document.getElementById('edit-stu-gc').value;
-    
-    if (newGc === 'Other') {
-        newGc = document.getElementById('edit-stu-gc-other').value.trim();
+    if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.style.opacity = "0.7";
+        animInterval = setInterval(() => {
+            dotCount = (dotCount + 1) % 4;
+            saveBtn.textContent = "Saving" + ".".repeat(dotCount);
+        }, 300); // Adds a dot every 300ms
     }
 
-    if (!newName || !newId) {
-        alert("Name and ID cannot be empty.");
-        return;
-    }
+    try {
+        // Lock the background sync immediately!
+        lastDataPushTime = Date.now(); 
 
-    let students = JSON.parse(localStorage.getItem('students')) || [];
-    let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
-
-    if (origId !== newId && students.some(s => String(s.id) === newId)) {
-        alert("This Student ID is already in use by another student.");
-        return;
-    }
-
-    const studentIndex = students.findIndex(s => String(s.id) === origId);
-    if (studentIndex > -1) {
-        students[studentIndex].name = newName;
-        students[studentIndex].id = newId;
-        students[studentIndex].classLevel = newClass;
-        // FIX: Was mistakenly written as .tag in old code. Must be .gcHandle
-        students[studentIndex].gcHandle = newGc; 
-    }
-
-    // Cascade ID changes to history logs
-    logs.forEach(l => {
-        if (String(l.id) === origId) {
-            l.id = newId;
-            l.name = newName;
+        const origId = document.getElementById('edit-stu-orig-id').value;
+        const newName = document.getElementById('edit-stu-name').value.trim();
+        const newId = document.getElementById('edit-stu-id').value.trim();
+        const newClass = document.getElementById('edit-stu-class').value;
+        let newGc = document.getElementById('edit-stu-gc').value;
+        
+        if (newGc === 'Other') {
+            newGc = document.getElementById('edit-stu-gc-other').value.trim();
         }
-    });
 
-    localStorage.setItem('students', JSON.stringify(students));
-    localStorage.setItem('attendanceLogs', JSON.stringify(logs));
-    
-    // 2. Push to Supabase
-    await pushLogsToCloud();
-    
-    // 3. Close Modal & Instant Auto-Refresh!
-    closeEditStudentModal();
-    forceInstantUIRefresh();
+        if (!newName || !newId) {
+            alert("Name and ID cannot be empty.");
+            return;
+        }
+
+        let students = JSON.parse(localStorage.getItem('students')) || [];
+        let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
+
+        if (origId !== newId && students.some(s => String(s.id) === newId)) {
+            alert("This Student ID is already in use by another student.");
+            return;
+        }
+
+        const studentIndex = students.findIndex(s => String(s.id) === origId);
+        if (studentIndex > -1) {
+            students[studentIndex].name = newName;
+            students[studentIndex].id = newId;
+            students[studentIndex].classLevel = newClass;
+            students[studentIndex].gcHandle = newGc; 
+        }
+
+        // Cascade ID changes to history logs
+        logs.forEach(l => {
+            if (String(l.id) === origId) {
+                l.id = newId;
+                l.name = newName;
+            }
+        });
+
+        localStorage.setItem('students', JSON.stringify(students));
+        localStorage.setItem('attendanceLogs', JSON.stringify(logs));
+        
+        // 2. Push to Supabase and wait 800ms so the animation is visible
+        await pushLogsToCloud();
+        await new Promise(resolve => setTimeout(resolve, 800));
+
+    } finally {
+        // --- 3. Stop Animation, Reset Button, and Refresh ---
+        if (saveBtn) {
+            clearInterval(animInterval);
+            saveBtn.textContent = "Save Changes";
+            saveBtn.disabled = false;
+            saveBtn.style.opacity = "1";
+        }
+        closeEditStudentModal();
+        forceInstantUIRefresh();
+    }
 }
 
 async function deleteStudent(idNum) {
@@ -3648,100 +3671,126 @@ function closeEditLogModal() {
 async function saveEditLogModal() {
     if(!isAuthenticated()) return;
 
-    // 1. Lock the background sync immediately!
-    lastDataPushTime = Date.now(); 
+    // --- 1. Start "Saving..." Animation ---
+    const saveBtn = document.querySelector('#edit-log-modal .btn-primary');
+    let dotCount = 0;
+    let animInterval;
 
-    const idNum = document.getElementById('edit-log-id').value;
-    const dateStr = document.getElementById('edit-log-date').value;
-    
-    const inVal = document.getElementById('edit-log-in').value.trim();
-    const outVal = document.getElementById('edit-log-out').value.trim();
-    
-    let gcHandle = document.getElementById('edit-log-gc').value;
-    if (gcHandle === 'Other') {
-        gcHandle = document.getElementById('edit-log-gc-other').value.trim() || '-';
-    }
-    
-    const ann = document.getElementById('edit-log-ann').value;
-    const post = document.getElementById('edit-log-post').value;
-
-    const timeRegex = /^(0?[1-9]|1[0-2]):[0-5][0-9]:[0-5][0-9]\s(AM|PM)$/i;
-    
-    if (inVal && !timeRegex.test(inVal)) {
-        alert("Invalid Time In format. Use HH:MM:SS AM/PM (e.g., 05:00:00 AM)");
-        return;
-    }
-    if (outVal && !timeRegex.test(outVal)) {
-        alert("Invalid Time Out format. Use HH:MM:SS AM/PM (e.g., 05:00:00 PM)");
-        return;
+    if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.style.opacity = "0.7";
+        animInterval = setInterval(() => {
+            dotCount = (dotCount + 1) % 4;
+            saveBtn.textContent = "Saving" + ".".repeat(dotCount);
+        }, 300);
     }
 
-    let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
-    const students = JSON.parse(localStorage.getItem('students')) || [];
-    const student = students.find(s => String(s.id) === String(idNum));
-    
-    if (!student) return;
+    try {
+        // Lock the background sync immediately!
+        lastDataPushTime = Date.now(); 
 
-    logs = logs.filter(l => !(String(l.id) === String(idNum) && l.date === dateStr));
+        const idNum = document.getElementById('edit-log-id').value;
+        const dateStr = document.getElementById('edit-log-date').value;
+        
+        const inVal = document.getElementById('edit-log-in').value.trim();
+        const outVal = document.getElementById('edit-log-out').value.trim();
+        
+        let gcHandle = document.getElementById('edit-log-gc').value;
+        if (gcHandle === 'Other') {
+            gcHandle = document.getElementById('edit-log-gc-other').value.trim() || '-';
+        }
+        
+        const ann = document.getElementById('edit-log-ann').value;
+        const post = document.getElementById('edit-log-post').value;
 
-    if (!inVal && !outVal) {
-        logs.push({
-            name: student.name || 'Unknown',
-            id: student.id,
-            action: 'No Attendance',
-            time: '00:00:00 AM', 
-            date: dateStr,
-            details: null
-        });
-    } else {
-        if (inVal) {
-            const timeMatch = inVal.match(/(\d+):(\d+):(\d+)\s+(AM|PM)/i);
-            let h = parseInt(timeMatch[1]);
-            const m = parseInt(timeMatch[2]);
-            const ampm = timeMatch[4].toUpperCase();
-            if (ampm === 'PM' && h !== 12) h += 12;
-            if (ampm === 'AM' && h === 12) h = 0;
-            
-            const newAction = (h > 8 || (h === 8 && m >= 1)) ? 'Time In (Late)' : 'Time In';
-            
+        const timeRegex = /^(0?[1-9]|1[0-2]):[0-5][0-9]:[0-5][0-9]\s(AM|PM)$/i;
+        
+        if (inVal && !timeRegex.test(inVal)) {
+            alert("Invalid Time In format. Use HH:MM:SS AM/PM (e.g., 05:00:00 AM)");
+            return;
+        }
+        if (outVal && !timeRegex.test(outVal)) {
+            alert("Invalid Time Out format. Use HH:MM:SS AM/PM (e.g., 05:00:00 PM)");
+            return;
+        }
+
+        let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
+        const students = JSON.parse(localStorage.getItem('students')) || [];
+        const student = students.find(s => String(s.id) === String(idNum));
+        
+        if (!student) return;
+
+        logs = logs.filter(l => !(String(l.id) === String(idNum) && l.date === dateStr));
+
+        if (!inVal && !outVal) {
             logs.push({
                 name: student.name || 'Unknown',
                 id: student.id,
-                action: newAction,
-                time: inVal.toUpperCase(),
+                action: 'No Attendance',
+                time: '00:00:00 AM', 
                 date: dateStr,
                 details: null
             });
-        }
-        
-        if (outVal) {
-            const timeMatch = outVal.match(/(\d+):(\d+):(\d+)\s+(AM|PM)/i);
-            let h = parseInt(timeMatch[1]);
-            const ampm = timeMatch[4].toUpperCase();
-            if (ampm === 'PM' && h !== 12) h += 12;
-            if (ampm === 'AM' && h === 12) h = 0;
+        } else {
+            if (inVal) {
+                const timeMatch = inVal.match(/(\d+):(\d+):(\d+)\s+(AM|PM)/i);
+                let h = parseInt(timeMatch[1]);
+                const m = parseInt(timeMatch[2]);
+                const ampm = timeMatch[4].toUpperCase();
+                if (ampm === 'PM' && h !== 12) h += 12;
+                if (ampm === 'AM' && h === 12) h = 0;
+                
+                const newAction = (h > 8 || (h === 8 && m >= 1)) ? 'Time In (Late)' : 'Time In';
+                
+                logs.push({
+                    name: student.name || 'Unknown',
+                    id: student.id,
+                    action: newAction,
+                    time: inVal.toUpperCase(),
+                    date: dateStr,
+                    details: null
+                });
+            }
             
-            const newAction = (h >= 0 && h <= 4) ? 'Time Out (Late)' : 'Time Out';
+            if (outVal) {
+                const timeMatch = outVal.match(/(\d+):(\d+):(\d+)\s+(AM|PM)/i);
+                let h = parseInt(timeMatch[1]);
+                const ampm = timeMatch[4].toUpperCase();
+                if (ampm === 'PM' && h !== 12) h += 12;
+                if (ampm === 'AM' && h === 12) h = 0;
+                
+                const newAction = (h >= 0 && h <= 4) ? 'Time Out (Late)' : 'Time Out';
 
-            logs.push({
-                name: student.name || 'Unknown',
-                id: student.id,
-                action: newAction,
-                time: outVal.toUpperCase(),
-                date: dateStr,
-                details: { gcHandle: gcHandle, announcement: ann, whoPosted: post }
-            });
+                logs.push({
+                    name: student.name || 'Unknown',
+                    id: student.id,
+                    action: newAction,
+                    time: outVal.toUpperCase(),
+                    date: dateStr,
+                    details: { gcHandle: gcHandle, announcement: ann, whoPosted: post }
+                });
+            }
         }
-    }
 
-    localStorage.setItem('attendanceLogs', JSON.stringify(logs));
-    
-    // 2. Push to Supabase
-    try { await pushLogsToCloud(); } catch(e) { console.error("Cloud push failed:", e); }
-    
-    // 3. Close Modal & Instant Auto-Refresh!
-    closeEditLogModal();
-    forceInstantUIRefresh();
+        localStorage.setItem('attendanceLogs', JSON.stringify(logs));
+        
+        // 2. Push to Supabase and wait 800ms
+        await pushLogsToCloud();
+        await new Promise(resolve => setTimeout(resolve, 800));
+
+    } catch(e) { 
+        console.error("Cloud push failed:", e); 
+    } finally {
+        // --- 3. Stop Animation, Reset Button, and Refresh ---
+        if (saveBtn) {
+            clearInterval(animInterval);
+            saveBtn.textContent = "Save Changes";
+            saveBtn.disabled = false;
+            saveBtn.style.opacity = "1";
+        }
+        closeEditLogModal();
+        forceInstantUIRefresh();
+    }
 }
 
 async function sendHeartbeat() {
