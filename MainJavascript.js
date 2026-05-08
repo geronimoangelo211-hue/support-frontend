@@ -203,29 +203,38 @@ let lastConfigPushTime = 0;
 
 async function pullFromCloud() {
     try {
-        const response = await fetch(`${API_BASE_URL}/sync/pull`);
+        // We add a unique timestamp (?t=...) so the browser cannot use a cached version
+        const cacheBuster = new Date().getTime();
+        const response = await fetch(`${API_BASE_URL}/sync/pull?t=${cacheBuster}`, {
+            headers: {
+                'Cache-Control': 'no-cache',
+                'Pragma': 'no-cache'
+            }
+        });
+
         if (response.ok) {
             const data = await response.json();
             
             const serverHasStudents = (data.students && data.students !== "[]" && data.students !== "null");
             const serverHasLogs = (data.logs && data.logs !== "[]" && data.logs !== "null");
 
-            const localStudents = localStorage.getItem('students');
-            const localLogs = localStorage.getItem('attendanceLogs');
-
-            if (!serverHasStudents && !serverHasLogs && (localStudents || localLogs)) {
-                await pushLogsToCloud();
-                return; 
-            }
-
-            if (serverHasStudents) localStorage.setItem('students', data.students);
-            if (serverHasLogs) localStorage.setItem('attendanceLogs', data.logs);
-            
-            // FIX: Only overwrite the Lock Config if 5 seconds have passed since you clicked the switch
-            if (data.config && data.config !== "{}" && data.config !== "null") {
-                if (Date.now() - lastConfigPushTime > 5000) {
+            if (Date.now() - lastDataPushTime > 10000) {
+                if (serverHasStudents) {
+                    localStorage.setItem('students', data.students);
+                }
+                if (serverHasLogs) {
+                    localStorage.setItem('attendanceLogs', data.logs);
+                }
+                if (data.config && data.config !== "{}" && data.config !== "null") {
                     localStorage.setItem('sys_config', data.config);
                     applySystemConfig(); 
+                }
+                
+                // Refresh the UI so the changes actually show up
+                if (document.getElementById('admin-dashboard-view').classList.contains('active')) {
+                    renderStudents();
+                    renderSchedule();
+                    renderLogs();
                 }
             }
         }
@@ -236,6 +245,7 @@ async function pullFromCloud() {
 
 async function pushStudentsToCloud() {
     if (!isAuthenticated()) return; 
+    await pushLogsToCloud();
     const data = JSON.parse(localStorage.getItem('students')) || [];
     try {
         await fetch(`${API_BASE_URL}/students/sync`, {
@@ -249,15 +259,15 @@ async function pushStudentsToCloud() {
 let lastDataPushTime = 0;
 
 async function pushLogsToCloud() {
+    // 1. Lock the pull engine immediately for 10 seconds
+    lastDataPushTime = Date.now(); 
+
     const studentsData = localStorage.getItem('students') || "[]";
     const logsData = localStorage.getItem('attendanceLogs') || "[]";
     const configData = localStorage.getItem('sys_config') || '{"locked":false,"regOpen":false}';
     
-    // Lock the sync engine for 5 seconds so old data doesn't overwrite your edits
-    lastDataPushTime = Date.now(); 
-    
     try {
-        await fetch(`${API_BASE_URL}/sync/push`, {
+        const response = await fetch(`${API_BASE_URL}/sync/push`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -266,40 +276,12 @@ async function pushLogsToCloud() {
                 config: configData
             })
         });
-    } catch (e) {
-        console.error("Cloud push failed.", e);
-    }
-}
-
-async function pullFromCloud() {
-    try {
-        const response = await fetch(`${API_BASE_URL}/sync/pull`);
+        
         if (response.ok) {
-            const data = await response.json();
-            
-            const serverHasStudents = (data.students && data.students !== "[]" && data.students !== "null");
-            const serverHasLogs = (data.logs && data.logs !== "[]" && data.logs !== "null");
-
-            const localStudents = localStorage.getItem('students');
-            const localLogs = localStorage.getItem('attendanceLogs');
-
-            if (!serverHasStudents && !serverHasLogs && (localStudents || localLogs)) {
-                await pushLogsToCloud();
-                return; 
-            }
-
-            if (Date.now() - lastDataPushTime > 5000) {
-                if (serverHasStudents) localStorage.setItem('students', data.students);
-                if (serverHasLogs) localStorage.setItem('attendanceLogs', data.logs);
-                
-                if (data.config && data.config !== "{}" && data.config !== "null") {
-                    localStorage.setItem('sys_config', data.config);
-                    applySystemConfig(); 
-                }
-            }
+            console.log("Cloud sync successful.");
         }
     } catch (e) {
-        console.error("Cloud pull failed.", e);
+        console.error("Cloud push failed.", e);
     }
 }
 
@@ -419,7 +401,7 @@ _studentsInit.forEach(s => {
 });
 if (_needsSave && isAuthenticated()) {
     localStorage.setItem('students', JSON.stringify(_studentsInit));
-    pushStudentsToCloud();
+    pushLogsToCloud();
 }
 
 document.addEventListener('DOMContentLoaded', () => {
