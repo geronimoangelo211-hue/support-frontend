@@ -2018,7 +2018,7 @@ function renderLogs() {
             <td>
                 <div class="button-cell-wrap">
                     ${todayShiftBtn}
-                    <button class="remove-btn" onclick="deleteLog(${log.originalIndex})">REMOVE</button>
+                    <button class="remove-btn" onclick="deleteLog('${safeId}', '${log.date}')">REMOVE</button>
                 </div>
             </td>
         `;
