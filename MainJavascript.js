@@ -203,9 +203,10 @@ let lastConfigPushTime = 0;
 
 async function pullFromCloud() {
     try {
-        // We add a unique timestamp (?t=...) so the browser cannot use a cached version
-        const cacheBuster = new Date().getTime();
-        const response = await fetch(`${API_BASE_URL}/sync/pull?t=${cacheBuster}`, {
+        // 1. The "?t=..." cache-buster forces the browser to pull FRESH data from Supabase
+        const timestamp = new Date().getTime();
+        const response = await fetch(`${API_BASE_URL}/sync/pull?t=${timestamp}`, {
+            cache: 'no-store',
             headers: {
                 'Cache-Control': 'no-cache',
                 'Pragma': 'no-cache'
@@ -218,23 +219,28 @@ async function pullFromCloud() {
             const serverHasStudents = (data.students && data.students !== "[]" && data.students !== "null");
             const serverHasLogs = (data.logs && data.logs !== "[]" && data.logs !== "null");
 
+            const localStudents = localStorage.getItem('students');
+            const localLogs = localStorage.getItem('attendanceLogs');
+
+            // 2. If Supabase is totally empty but you have local students, push them up!
+            if (!serverHasStudents && !serverHasLogs && (localStudents || localLogs)) {
+                await pushLogsToCloud();
+                return; 
+            }
+
             if (Date.now() - lastDataPushTime > 10000) {
-                if (serverHasStudents) {
-                    localStorage.setItem('students', data.students);
-                }
-                if (serverHasLogs) {
-                    localStorage.setItem('attendanceLogs', data.logs);
-                }
+                if (serverHasStudents) localStorage.setItem('students', data.students);
+                if (serverHasLogs) localStorage.setItem('attendanceLogs', data.logs);
+                
                 if (data.config && data.config !== "{}" && data.config !== "null") {
                     localStorage.setItem('sys_config', data.config);
                     applySystemConfig(); 
                 }
-                
-                // Refresh the UI so the changes actually show up
+
                 if (document.getElementById('admin-dashboard-view').classList.contains('active')) {
-                    renderStudents();
-                    renderSchedule();
-                    renderLogs();
+                    if (typeof renderStudents === 'function') renderStudents();
+                    if (typeof renderLogs === 'function') renderLogs();
+                    if (typeof renderSchedule === 'function') renderSchedule();
                 }
             }
         }
@@ -477,32 +483,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 });
-
-setInterval(async () => {
-    updateDailyMascot();
-    await pullFromCloud(); 
-    await checkBackendLockStatus(); 
-    checkDeviceLock(); 
-    
-
-    if (isAuthenticated()) {
-        if (document.getElementById('admin-dashboard-view').classList.contains('active')) {
-            renderStudents();
-            renderSchedule();
-            renderDashboardSummary();
-            renderLogs();
-            renderMainDashboard();
-            renderDutyToday();
-            
-            const secHist = document.getElementById('sec-history');
-            if (secHist && secHist.classList.contains('active')) {
-                if (document.getElementById('history-table-container').style.display === 'none') {
-                    renderHistoryView();
-                }
-            }
-        }
-    }
-}, 15000);
 
 async function loginAdmin(event) {
     if (event) event.preventDefault();
