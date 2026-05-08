@@ -4423,3 +4423,50 @@ function forceInstantUIRefresh() {
         }
     }
 }
+
+function showLoadingOverlay(message = "Processing...") {
+    let overlay = document.getElementById('global-loading-overlay');
+    if (!overlay) {
+        // Create the blur background
+        overlay = document.createElement('div');
+        overlay.id = 'global-loading-overlay';
+        overlay.style.cssText = `
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+            background: rgba(0, 0, 0, 0.4);
+            backdrop-filter: blur(6px); /* The Glass Blur Effect */
+            -webkit-backdrop-filter: blur(6px);
+            z-index: 9999; display: flex; justify-content: center;
+            align-items: center; flex-direction: column;
+            color: white; font-family: sans-serif;
+        `;
+        
+        // Create the spinning circle
+        const spinner = document.createElement('div');
+        spinner.style.cssText = `
+            border: 4px solid rgba(255, 255, 255, 0.2);
+            border-top: 4px solid #fff; border-radius: 50%;
+            width: 50px; height: 50px; margin-bottom: 15px;
+            animation: spin 1s linear infinite;
+        `;
+        const style = document.createElement('style');
+        style.innerHTML = `@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`;
+        document.head.appendChild(style);
+
+        // Create the text
+        const text = document.createElement('div');
+        text.id = 'global-loading-text';
+        text.style.fontWeight = 'bold';
+        text.style.fontSize = '1.2rem';
+
+        overlay.appendChild(spinner);
+        overlay.appendChild(text);
+        document.body.appendChild(overlay);
+    }
+    document.getElementById('global-loading-text').innerText = message;
+    overlay.style.display = 'flex';
+}
+
+function hideLoadingOverlay() {
+    const overlay = document.getElementById('global-loading-overlay');
+    if (overlay) overlay.style.display = 'none';
+}
