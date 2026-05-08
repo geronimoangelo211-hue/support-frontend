@@ -236,7 +236,6 @@ async function pullFromCloud() {
 
 async function pushStudentsToCloud() {
     if (!isAuthenticated()) return; 
-    await pushLogsToCloud();
     const data = JSON.parse(localStorage.getItem('students')) || [];
     try {
         await fetch(`${API_BASE_URL}/students/sync`, {
@@ -269,6 +268,38 @@ async function pushLogsToCloud() {
         });
     } catch (e) {
         console.error("Cloud push failed.", e);
+    }
+}
+
+async function pullFromCloud() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/sync/pull`);
+        if (response.ok) {
+            const data = await response.json();
+            
+            const serverHasStudents = (data.students && data.students !== "[]" && data.students !== "null");
+            const serverHasLogs = (data.logs && data.logs !== "[]" && data.logs !== "null");
+
+            const localStudents = localStorage.getItem('students');
+            const localLogs = localStorage.getItem('attendanceLogs');
+
+            if (!serverHasStudents && !serverHasLogs && (localStudents || localLogs)) {
+                await pushLogsToCloud();
+                return; 
+            }
+
+            if (Date.now() - lastDataPushTime > 5000) {
+                if (serverHasStudents) localStorage.setItem('students', data.students);
+                if (serverHasLogs) localStorage.setItem('attendanceLogs', data.logs);
+                
+                if (data.config && data.config !== "{}" && data.config !== "null") {
+                    localStorage.setItem('sys_config', data.config);
+                    applySystemConfig(); 
+                }
+            }
+        }
+    } catch (e) {
+        console.error("Cloud pull failed.", e);
     }
 }
 
@@ -388,7 +419,7 @@ _studentsInit.forEach(s => {
 });
 if (_needsSave && isAuthenticated()) {
     localStorage.setItem('students', JSON.stringify(_studentsInit));
-    pushLogsToCloud();
+    pushStudentsToCloud();
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -4378,4 +4409,4 @@ function updateDailyMascot() {
     if (!mascotImg.src.includes(newSrc)) {
         mascotImg.src = newSrc;
     }
-}z
+}
