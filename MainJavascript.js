@@ -1093,32 +1093,35 @@ async function deleteLog(idNum, dateStr) {
     const confirmDelete = confirm("Are you sure you want to delete this attendance record?");
     if (!confirmDelete) return;
 
-    // --- 1. Show the Localized Loading Spinner ---
+    // --- 1. INSTANT FRONTEND REMOVAL ---
+    let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
+    
+    // Filter out the deleted log locally
+    const updatedLogs = logs.filter(l => !(String(l.id) === String(idNum) && l.date === dateStr));
+    
+    // Save the new list to browser memory instantly
+    localStorage.setItem('attendanceLogs', JSON.stringify(updatedLogs));
+    
+    // Lock the background sync immediately so the 15s timer doesn't pull old data
+    lastDataPushTime = Date.now(); 
+
+    // Instantly redraw the screen! The log will vanish instantly.
+    forceInstantUIRefresh();
+
+    // --- 2. BACKGROUND DATABASE SYNC ---
+    // We start the spinner so they know it's syncing, but the UI is already updated.
     const spinner = document.getElementById('live-log-spinner');
     if (spinner) spinner.style.display = 'inline-block';
 
     try {
-        // Lock the background sync immediately!
-        lastDataPushTime = Date.now(); 
-
-        let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
-        
-        // Remove the specific log
-        logs = logs.filter(l => !(String(l.id) === String(idNum) && l.date === dateStr));
-        
-        localStorage.setItem('attendanceLogs', JSON.stringify(logs));
-        
-        // --- 2. Push to Supabase and wait 800ms for visual feedback ---
+        // Push the new (smaller) list to Supabase in the background
         await pushLogsToCloud();
-        await new Promise(resolve => setTimeout(resolve, 800));
-
     } catch (e) {
-        console.error("Failed to delete log from cloud:", e);
-        alert("Error deleting log. Check your connection.");
+        console.error("Failed to sync deletion to the cloud:", e);
+        // Optional: If the cloud fails, we let them know it didn't save permanently.
+        alert("Warning: The log was removed from your screen, but there was an error connecting to the database.");
     } finally {
-        // --- 3. Hide Spinner and Instant Auto-Refresh ---
         if (spinner) spinner.style.display = 'none';
-        forceInstantUIRefresh();
     }
 }
 
