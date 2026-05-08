@@ -1445,107 +1445,132 @@ async function factoryReset() {
 }
 
 async function handleTimeIn() {
-    await pullFromCloud();
+    // --- 1. Prevent Double Clicks & Start Animation ---
+    const btnIn = document.querySelector('.btn-in');
+    let seqIndex = 0;
+    let animInterval;
+    const saveSequence = ["Submitting.", "Submitting..", "Submitting..."];
 
-    const idInput = document.getElementById('student-id-input'); 
-    const messageEl = document.getElementById('student-message');
-
-    if (!idInput || !messageEl) {
-        console.error("System Error: Could not find the ID input or message element.");
-        return;
+    if (btnIn) {
+        if (btnIn.disabled) return; // Locks the button so it only triggers ONCE
+        btnIn.disabled = true;
+        btnIn.style.opacity = "0.8";
+        btnIn.textContent = saveSequence[0];
+        animInterval = setInterval(() => {
+            seqIndex = (seqIndex + 1) % saveSequence.length;
+            btnIn.textContent = saveSequence[seqIndex];
+        }, 600);
     }
-
-    const studentId = idInput.value.trim();
-
-    if (!studentId) {
-        messageEl.textContent = "Please enter your Student ID Number.";
-        messageEl.className = "message error";
-        return;
-    }
-
-    const timeWindow = getCurrentTimeWindow();
-
-    if (timeWindow === "TOO_EARLY") {
-        messageEl.textContent = "Shift has not started yet. Time In opens at 5:00 AM.";
-        messageEl.className = "message error";
-        return;
-    }
-    if (timeWindow === "LOCKOUT") {
-        messageEl.textContent = "System Locked (12:01 PM - 4:59 PM). If you missed Time In, you are marked Absent.";
-        messageEl.className = "message error";
-        return;
-    }
-    if (timeWindow === "TIME_OUT_NORMAL" || timeWindow === "TIME_OUT_LATE") {
-        messageEl.textContent = "Time In is closed for this shift. It is currently the Time Out period.";
-        messageEl.className = "message error";
-        return;
-    }
-
-    let actionStr = "Time In";
-    if (timeWindow === "TIME_IN_LATE") {
-        actionStr = "Time In (Late)";
-    }
-
-    const students = JSON.parse(localStorage.getItem('students')) || [];
-    let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
-    const shift = getShiftDateDetails();
-
-    const student = students.find(s => String(s.id).toLowerCase() === studentId.toLowerCase());
-    
-    if (!student) {
-        messageEl.textContent = "Student ID not found. Please register first.";
-        messageEl.className = "message error";
-        return;
-    }
-
-    if (!student.assignedDays || !student.assignedDays.includes(shift.dayStr)) {
-        messageEl.textContent = `You are not scheduled for duty today (${shift.dayStr}).`;
-        messageEl.className = "message error";
-        return;
-    }
-
-    const alreadyTimedIn = logs.some(l => 
-        String(l.id).toLowerCase() === studentId.toLowerCase() && 
-        l.date === shift.dateStr && 
-        l.action.includes('Time In')
-    );
-
-    if (alreadyTimedIn) {
-        messageEl.textContent = "You have already timed in for this shift.";
-        messageEl.className = "message error";
-        return;
-    }
-
-    const newLog = {
-        name: student.name,
-        id: student.id,
-        action: actionStr,
-        time: shift.realTimeStr,
-        date: shift.dateStr,
-        details: null
-    };
-
-    logs.push(newLog);
-
-    localStorage.setItem('attendanceLogs', JSON.stringify(logs));
-    localStorage.setItem('activeDeviceStudent', student.id);
-    checkDeviceLock(); 
-    
-    messageEl.textContent = `Success: ${student.name} - ${actionStr} at ${shift.realTimeStr}`;
-    messageEl.className = "message success";
-    idInput.value = ''; 
 
     try {
+        await pullFromCloud();
+
+        const idInput = document.getElementById('student-id-input'); 
+        const messageEl = document.getElementById('student-message');
+
+        if (!idInput || !messageEl) return;
+        const studentId = idInput.value.trim();
+
+        if (!studentId) {
+            messageEl.textContent = "Please enter your Student ID Number.";
+            messageEl.className = "message error";
+            return;
+        }
+
+        const timeWindow = getCurrentTimeWindow();
+
+        if (timeWindow === "TOO_EARLY") {
+            messageEl.textContent = "Shift has not started yet. Time In opens at 5:00 AM.";
+            messageEl.className = "message error";
+            return;
+        }
+        if (timeWindow === "LOCKOUT") {
+            messageEl.textContent = "System Locked (12:01 PM - 4:59 PM). If you missed Time In, you are marked Absent.";
+            messageEl.className = "message error";
+            return;
+        }
+        if (timeWindow === "TIME_OUT_NORMAL" || timeWindow === "TIME_OUT_LATE") {
+            messageEl.textContent = "Time In is closed for this shift. It is currently the Time Out period.";
+            messageEl.className = "message error";
+            return;
+        }
+
+        let actionStr = "Time In";
+        if (timeWindow === "TIME_IN_LATE") {
+            actionStr = "Time In (Late)";
+        }
+
+        const students = JSON.parse(localStorage.getItem('students')) || [];
+        let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
+        const shift = getShiftDateDetails();
+
+        const student = students.find(s => String(s.id).toLowerCase() === studentId.toLowerCase());
+        
+        if (!student) {
+            messageEl.textContent = "Student ID not found. Please register first.";
+            messageEl.className = "message error";
+            return;
+        }
+
+        if (!student.assignedDays || !student.assignedDays.includes(shift.dayStr)) {
+            messageEl.textContent = `You are not scheduled for duty today (${shift.dayStr}).`;
+            messageEl.className = "message error";
+            return;
+        }
+
+        const alreadyTimedIn = logs.some(l => 
+            String(l.id).toLowerCase() === studentId.toLowerCase() && 
+            l.date === shift.dateStr && 
+            l.action.includes('Time In')
+        );
+
+        if (alreadyTimedIn) {
+            messageEl.textContent = "You have already timed in for this shift.";
+            messageEl.className = "message error";
+            return;
+        }
+
+        const newLog = {
+            name: student.name,
+            id: student.id,
+            action: actionStr,
+            time: shift.realTimeStr,
+            date: shift.dateStr,
+            details: null
+        };
+
+        logs.push(newLog);
+
+        localStorage.setItem('attendanceLogs', JSON.stringify(logs));
+        localStorage.setItem('activeDeviceStudent', student.id);
+        
+        messageEl.textContent = `Success: ${student.name} - ${actionStr} at ${shift.realTimeStr}`;
+        messageEl.className = "message success";
+        idInput.value = ''; 
+
+        // 2. Push to Supabase and wait a tiny bit so the animation feels natural
         await pushLogsToCloud();
-    } catch (e) {
-        console.error("Cloud push failed, but data is saved locally.", e);
-    }
+        await new Promise(resolve => setTimeout(resolve, 800));
 
-    try {
-        if (typeof renderAttendanceLogs === 'function') renderAttendanceLogs();
-        if (typeof renderDashboardSummary === 'function') renderDashboardSummary();
-        if (typeof renderAttendanceSummary === 'function') renderAttendanceSummary();
-    } catch(e) {}
+        checkDeviceLock(); 
+        
+        try {
+            if (typeof renderAttendanceLogs === 'function') renderAttendanceLogs();
+            if (typeof renderDashboardSummary === 'function') renderDashboardSummary();
+            if (typeof renderAttendanceSummary === 'function') renderAttendanceSummary();
+        } catch(e) {}
+
+    } catch (error) {
+        console.error(error);
+    } finally {
+        // --- 3. Stop Animation & Restore Button automatically ---
+        if (btnIn) {
+            clearInterval(animInterval);
+            btnIn.textContent = "Time In";
+            btnIn.disabled = false;
+            btnIn.style.opacity = "1";
+        }
+    }
 }
 
 function getShiftDateDetails() {
@@ -4110,115 +4135,151 @@ function viewHistoryDetails(studentId, historyDateStr) {
 }
 
 async function handleTimeOut() {
-    await pullFromCloud();
+    // --- 1. Prevent Double Clicks & Start Animation ---
+    const btnOut = document.querySelector('.btn-out');
+    let seqIndex = 0;
+    let animInterval;
+    const saveSequence = ["Submitting.", "Submitting..", "Submitting..."];
 
-    const idInput = document.getElementById('student-id-input'); 
-    const messageEl = document.getElementById('student-message');
-
-    if (!idInput || !messageEl) return;
-    const studentId = idInput.value.trim();
-
-    if (!studentId) {
-        messageEl.textContent = "Please enter your Student ID Number.";
-        messageEl.className = "message error";
-        return;
+    if (btnOut) {
+        if (btnOut.disabled) return; // Locks the button so it only triggers ONCE
+        btnOut.disabled = true;
+        btnOut.style.opacity = "0.8";
+        btnOut.textContent = saveSequence[0];
+        animInterval = setInterval(() => {
+            seqIndex = (seqIndex + 1) % saveSequence.length;
+            btnOut.textContent = saveSequence[seqIndex];
+        }, 600);
     }
 
-    const timeWindow = getCurrentTimeWindow();
-
-    if (timeWindow === "LOCKOUT") {
-        messageEl.textContent = "System Locked (12:01 PM - 4:59 PM). Time Out opens at 5:00 PM.";
-        messageEl.className = "message error";
-        return;
-    }
-    if (timeWindow === "TIME_IN_NORMAL" || timeWindow === "TIME_IN_LATE" || timeWindow === "TOO_EARLY") {
-        messageEl.textContent = "It is too early to Time Out. Time Out opens at 5:00 PM.";
-        messageEl.className = "message error";
-        return;
-    }
-
-    let actionStr = "Time Out";
-    if (timeWindow === "TIME_OUT_LATE") actionStr = "Time Out (Late)";
-
-    const students = JSON.parse(localStorage.getItem('students')) || [];
-    let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
-    const shift = getShiftDateDetails();
-
-    const student = students.find(s => String(s.id).toLowerCase() === studentId.toLowerCase());
-    
-    if (!student) {
-        messageEl.textContent = "Student ID not found. Please register first.";
-        messageEl.className = "message error";
-        return;
-    }
-
-    if (!student.assignedDays || !student.assignedDays.includes(shift.dayStr)) {
-        messageEl.textContent = `You are not scheduled for duty today (${shift.dayStr}).`;
-        messageEl.className = "message error";
-        return;
-    }
-
-    const hasTimedIn = logs.some(l => String(l.id).toLowerCase() === studentId.toLowerCase() && l.date === shift.dateStr && l.action.includes('Time In'));
-    if (!hasTimedIn) {
-        messageEl.textContent = "You cannot Time Out because you have no Time In record for today.";
-        messageEl.className = "message error";
-        return;
-    }
-
-    const alreadyTimedOut = logs.some(l => String(l.id).toLowerCase() === studentId.toLowerCase() && l.date === shift.dateStr && l.action.includes('Time Out'));
-    if (alreadyTimedOut) {
-        messageEl.textContent = "You have already timed out for this shift.";
-        messageEl.className = "message error";
-        return;
-    }
-
-    // 1. Open the Modal and wait for them to click Submit
-    const reportData = await askForShiftReport(student.gcHandle, student.name);
-
-    // 2. Build the new log
-    const newLog = {
-        name: student.name,
-        id: student.id,
-        action: actionStr,
-        time: shift.realTimeStr,
-        date: shift.dateStr,
-        details: {
-            gcHandle: reportData.gc,
-            announcement: reportData.ann,
-            whoPosted: reportData.name
-        } 
-    };
-
-    logs.push(newLog);
-    localStorage.setItem('attendanceLogs', JSON.stringify(logs));
-    localStorage.removeItem('activeDeviceStudent');
-    
-    // 3. Push to Supabase IN THE BACKGROUND while the animation runs
     try {
-        await pushLogsToCloud();
-        // Give the animation 1.2 seconds to be satisfying to the user
-        await new Promise(resolve => setTimeout(resolve, 1200));
-    } catch (e) {
-        console.error("Cloud push failed, but data is saved locally.", e);
-    } finally {
-        
-        // 4. Clean up the Modal and Animation
-        if (reportData.animInterval) clearInterval(reportData.animInterval);
-        if (reportData.overlay && document.body.contains(reportData.overlay)) {
-            document.body.removeChild(reportData.overlay);
-        }
-        
-        checkDeviceLock(); 
-        
-        messageEl.textContent = `Success: Shift Report submitted and Time Out recorded!`;
-        messageEl.className = "message success";
-        idInput.value = ''; 
+        await pullFromCloud();
 
+        const idInput = document.getElementById('student-id-input'); 
+        const messageEl = document.getElementById('student-message');
+
+        if (!idInput || !messageEl) return;
+        const studentId = idInput.value.trim();
+
+        if (!studentId) {
+            messageEl.textContent = "Please enter your Student ID Number.";
+            messageEl.className = "message error";
+            return;
+        }
+
+        const timeWindow = getCurrentTimeWindow();
+
+        if (timeWindow === "LOCKOUT") {
+            messageEl.textContent = "System Locked (12:01 PM - 4:59 PM). Time Out opens at 5:00 PM.";
+            messageEl.className = "message error";
+            return;
+        }
+        if (timeWindow === "TIME_IN_NORMAL" || timeWindow === "TIME_IN_LATE" || timeWindow === "TOO_EARLY") {
+            messageEl.textContent = "It is too early to Time Out. Time Out opens at 5:00 PM.";
+            messageEl.className = "message error";
+            return;
+        }
+
+        let actionStr = "Time Out";
+        if (timeWindow === "TIME_OUT_LATE") actionStr = "Time Out (Late)";
+
+        const students = JSON.parse(localStorage.getItem('students')) || [];
+        let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
+        const shift = getShiftDateDetails();
+
+        const student = students.find(s => String(s.id).toLowerCase() === studentId.toLowerCase());
+        
+        if (!student) {
+            messageEl.textContent = "Student ID not found. Please register first.";
+            messageEl.className = "message error";
+            return;
+        }
+
+        if (!student.assignedDays || !student.assignedDays.includes(shift.dayStr)) {
+            messageEl.textContent = `You are not scheduled for duty today (${shift.dayStr}).`;
+            messageEl.className = "message error";
+            return;
+        }
+
+        const hasTimedIn = logs.some(l => String(l.id).toLowerCase() === studentId.toLowerCase() && l.date === shift.dateStr && l.action.includes('Time In'));
+        if (!hasTimedIn) {
+            messageEl.textContent = "You cannot Time Out because you have no Time In record for today.";
+            messageEl.className = "message error";
+            return;
+        }
+
+        const alreadyTimedOut = logs.some(l => String(l.id).toLowerCase() === studentId.toLowerCase() && l.date === shift.dateStr && l.action.includes('Time Out'));
+        if (alreadyTimedOut) {
+            messageEl.textContent = "You have already timed out for this shift.";
+            messageEl.className = "message error";
+            return;
+        }
+
+        // --- 2. Stop Animation BEFORE opening the Shift Report Modal ---
+        if (btnOut) {
+            clearInterval(animInterval);
+            btnOut.textContent = "Time Out";
+            btnOut.disabled = false;
+            btnOut.style.opacity = "1";
+        }
+
+        // 3. Open the Modal and wait for them to click Submit
+        const reportData = await askForShiftReport(student.gcHandle, student.name);
+
+        const newLog = {
+            name: student.name,
+            id: student.id,
+            action: actionStr,
+            time: shift.realTimeStr,
+            date: shift.dateStr,
+            details: {
+                gcHandle: reportData.gc,
+                announcement: reportData.ann,
+                whoPosted: reportData.name
+            } 
+        };
+
+        logs.push(newLog);
+        localStorage.setItem('attendanceLogs', JSON.stringify(logs));
+        localStorage.removeItem('activeDeviceStudent');
+        
+        // 4. Push to Supabase IN THE BACKGROUND while the Modal's animation runs
         try {
-            if (typeof renderAttendanceLogs === 'function') renderAttendanceLogs();
-            if (typeof renderDashboardSummary === 'function') renderDashboardSummary();
-            if (typeof renderAttendanceSummary === 'function') renderAttendanceSummary();
-        } catch(e) {}
+            await pushLogsToCloud();
+            await new Promise(resolve => setTimeout(resolve, 1200));
+        } catch (e) {
+            console.error("Cloud push failed, but data is saved locally.", e);
+        } finally {
+            
+            // Clean up the Modal
+            if (reportData.animInterval) clearInterval(reportData.animInterval);
+            if (reportData.overlay && document.body.contains(reportData.overlay)) {
+                document.body.removeChild(reportData.overlay);
+            }
+            
+            checkDeviceLock(); 
+            
+            messageEl.textContent = `Success: Shift Report submitted and Time Out recorded!`;
+            messageEl.className = "message success";
+            idInput.value = ''; 
+
+            try {
+                if (typeof renderAttendanceLogs === 'function') renderAttendanceLogs();
+                if (typeof renderDashboardSummary === 'function') renderDashboardSummary();
+                if (typeof renderAttendanceSummary === 'function') renderAttendanceSummary();
+            } catch(e) {}
+        }
+
+    } catch (error) {
+        console.error(error);
+    } finally {
+        // --- Failsafe: Restore button if validation failed early ---
+        if (btnOut && btnOut.disabled) {
+            clearInterval(animInterval);
+            btnOut.textContent = "Time Out";
+            btnOut.disabled = false;
+            btnOut.style.opacity = "1";
+        }
     }
 }
 
