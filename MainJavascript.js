@@ -906,22 +906,30 @@ function closeEditStudentModal() {
 async function saveStudentEdit() {
     if(!isAuthenticated()) return;
     
-    // --- 1. Start "Saving..." Animation ---
+    // --- 1. Start Advanced "Saving" Sequence ---
     const saveBtn = document.querySelector('#edit-student-modal .btn-primary');
-    let dotCount = 0;
+    let seqIndex = 0;
     let animInterval;
+    const saveSequence = [
+        "Saving.", 
+        "Saving..", 
+        "Saving...", 
+        "Saving. (Press Cancel — it’ll save soon.)",
+        "Saving.. (Press Cancel — it’ll save soon.)",
+        "Saving... (Press Cancel — it’ll save soon.)"
+    ];
 
     if (saveBtn) {
         saveBtn.disabled = true;
-        saveBtn.style.opacity = "0.7";
+        saveBtn.style.opacity = "0.8";
+        saveBtn.textContent = saveSequence[0];
         animInterval = setInterval(() => {
-            dotCount = (dotCount + 1) % 4;
-            saveBtn.textContent = "Saving" + ".".repeat(dotCount);
-        }, 300); // Adds a dot every 300ms
+            seqIndex = (seqIndex + 1) % saveSequence.length;
+            saveBtn.textContent = saveSequence[seqIndex];
+        }, 600); // 600ms gives time to read the text
     }
 
     try {
-        // Lock the background sync immediately!
         lastDataPushTime = Date.now(); 
 
         const origId = document.getElementById('edit-stu-orig-id').value;
@@ -929,10 +937,7 @@ async function saveStudentEdit() {
         const newId = document.getElementById('edit-stu-id').value.trim();
         const newClass = document.getElementById('edit-stu-class').value;
         let newGc = document.getElementById('edit-stu-gc').value;
-        
-        if (newGc === 'Other') {
-            newGc = document.getElementById('edit-stu-gc-other').value.trim();
-        }
+        if (newGc === 'Other') newGc = document.getElementById('edit-stu-gc-other').value.trim();
 
         if (!newName || !newId) {
             alert("Name and ID cannot be empty.");
@@ -955,23 +960,18 @@ async function saveStudentEdit() {
             students[studentIndex].gcHandle = newGc; 
         }
 
-        // Cascade ID changes to history logs
         logs.forEach(l => {
-            if (String(l.id) === origId) {
-                l.id = newId;
-                l.name = newName;
-            }
+            if (String(l.id) === origId) { l.id = newId; l.name = newName; }
         });
 
         localStorage.setItem('students', JSON.stringify(students));
         localStorage.setItem('attendanceLogs', JSON.stringify(logs));
         
-        // 2. Push to Supabase and wait 800ms so the animation is visible
         await pushLogsToCloud();
         await new Promise(resolve => setTimeout(resolve, 800));
 
     } finally {
-        // --- 3. Stop Animation, Reset Button, and Refresh ---
+        // --- Reset and Close ---
         if (saveBtn) {
             clearInterval(animInterval);
             saveBtn.textContent = "Save Changes";
@@ -1161,7 +1161,18 @@ function closeExemptModal() {
 async function applyExempt(type) {
     if(!isAuthenticated()) return;
     
-    // 1. Lock the sync engine immediately so background pulls don't interrupt the UI
+    const clickedBtn = window.event ? window.event.target.closest('button') : null;
+    const originalText = clickedBtn ? clickedBtn.textContent : "";
+    const originalColor = clickedBtn ? clickedBtn.style.backgroundColor : "";
+    
+    if (clickedBtn) {
+        clickedBtn.textContent = "SAVED ✓";
+        clickedBtn.disabled = true;
+        // Optionally make it flash green
+        clickedBtn.style.backgroundColor = "var(--success, #28a745)"; 
+        clickedBtn.style.color = "#fff";
+    }
+
     lastDataPushTime = Date.now(); 
 
     let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
@@ -1174,33 +1185,20 @@ async function applyExempt(type) {
 
         if (type === 'IN' || type === 'BOTH') {
             logs = logs.filter(l => !(String(l.id) === String(pendingExemptId) && l.date === pendingExemptDate && l.action.includes('Time In')));
-            logs.push({
-                name: s.name,
-                id: s.id,
-                action: 'Time In (Exempted)',
-                time: 'Exempted',
-                date: pendingExemptDate,
-                details: null,
-                originalLog: existingInLog || null
-            });
+            logs.push({ name: s.name, id: s.id, action: 'Time In (Exempted)', time: 'Exempted', date: pendingExemptDate, details: null, originalLog: existingInLog || null });
         }
         
         if (type === 'OUT' || type === 'BOTH') {
             logs = logs.filter(l => !(String(l.id) === String(pendingExemptId) && l.date === pendingExemptDate && l.action.includes('Time Out')));
-            logs.push({
-                name: s.name,
-                id: s.id,
-                action: 'Time Out (Exempted)',
-                time: 'Exempted',
-                date: pendingExemptDate,
-                details: { gcHandle: '-', announcement: '-', whoPosted: '-' },
-                originalLog: existingOutLog || null
-            });
+            logs.push({ name: s.name, id: s.id, action: 'Time Out (Exempted)', time: 'Exempted', date: pendingExemptDate, details: { gcHandle: '-', announcement: '-', whoPosted: '-' }, originalLog: existingOutLog || null });
         }
 
         localStorage.setItem('attendanceLogs', JSON.stringify(logs));
-        // 2. Push directly to Supabase in the background
+        
         await pushLogsToCloud(); 
+        
+        // --- Wait a tiny bit so they can actually see the "SAVED ✓" text ---
+        await new Promise(resolve => setTimeout(resolve, 800));
         
         renderHistoryTable(pendingExemptDate);
         renderMainDashboard();
@@ -1208,9 +1206,20 @@ async function applyExempt(type) {
     
     const modal = document.getElementById('exempt-modal');
     if (modal) modal.style.display = 'none';
+    
+    // --- Reset everything ---
+    if (clickedBtn) {
+        clickedBtn.textContent = originalText;
+        clickedBtn.disabled = false;
+        clickedBtn.style.backgroundColor = originalColor;
+        clickedBtn.style.color = "";
+    }
+    
     pendingExemptId = null;
     pendingExemptDate = null;
     pendingExemptCheckbox = null;
+    
+    forceInstantUIRefresh();
 }
 
 async function removeExemptions(idNum, dateStr) {
@@ -3671,48 +3680,46 @@ function closeEditLogModal() {
 async function saveEditLogModal() {
     if(!isAuthenticated()) return;
 
-    // --- 1. Start "Saving..." Animation ---
+    // --- 1. Start Advanced "Saving" Sequence ---
     const saveBtn = document.querySelector('#edit-log-modal .btn-primary');
-    let dotCount = 0;
+    let seqIndex = 0;
     let animInterval;
+    const saveSequence = [
+        "Saving.", 
+        "Saving..", 
+        "Saving...", 
+        "Saving. (Press Cancel — it’ll save soon.)",
+        "Saving.. (Press Cancel — it’ll save soon.)",
+        "Saving... (Press Cancel — it’ll save soon.)"
+    ];
 
     if (saveBtn) {
         saveBtn.disabled = true;
-        saveBtn.style.opacity = "0.7";
+        saveBtn.style.opacity = "0.8";
+        saveBtn.textContent = saveSequence[0];
         animInterval = setInterval(() => {
-            dotCount = (dotCount + 1) % 4;
-            saveBtn.textContent = "Saving" + ".".repeat(dotCount);
-        }, 300);
+            seqIndex = (seqIndex + 1) % saveSequence.length;
+            saveBtn.textContent = saveSequence[seqIndex];
+        }, 600);
     }
 
     try {
-        // Lock the background sync immediately!
         lastDataPushTime = Date.now(); 
 
         const idNum = document.getElementById('edit-log-id').value;
         const dateStr = document.getElementById('edit-log-date').value;
-        
         const inVal = document.getElementById('edit-log-in').value.trim();
         const outVal = document.getElementById('edit-log-out').value.trim();
         
         let gcHandle = document.getElementById('edit-log-gc').value;
-        if (gcHandle === 'Other') {
-            gcHandle = document.getElementById('edit-log-gc-other').value.trim() || '-';
-        }
+        if (gcHandle === 'Other') gcHandle = document.getElementById('edit-log-gc-other').value.trim() || '-';
         
         const ann = document.getElementById('edit-log-ann').value;
         const post = document.getElementById('edit-log-post').value;
 
         const timeRegex = /^(0?[1-9]|1[0-2]):[0-5][0-9]:[0-5][0-9]\s(AM|PM)$/i;
-        
-        if (inVal && !timeRegex.test(inVal)) {
-            alert("Invalid Time In format. Use HH:MM:SS AM/PM (e.g., 05:00:00 AM)");
-            return;
-        }
-        if (outVal && !timeRegex.test(outVal)) {
-            alert("Invalid Time Out format. Use HH:MM:SS AM/PM (e.g., 05:00:00 PM)");
-            return;
-        }
+        if (inVal && !timeRegex.test(inVal)) { alert("Invalid Time In format."); return; }
+        if (outVal && !timeRegex.test(outVal)) { alert("Invalid Time Out format."); return; }
 
         let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
         const students = JSON.parse(localStorage.getItem('students')) || [];
@@ -3723,65 +3730,30 @@ async function saveEditLogModal() {
         logs = logs.filter(l => !(String(l.id) === String(idNum) && l.date === dateStr));
 
         if (!inVal && !outVal) {
-            logs.push({
-                name: student.name || 'Unknown',
-                id: student.id,
-                action: 'No Attendance',
-                time: '00:00:00 AM', 
-                date: dateStr,
-                details: null
-            });
+            logs.push({ name: student.name || 'Unknown', id: student.id, action: 'No Attendance', time: '00:00:00 AM', date: dateStr, details: null });
         } else {
             if (inVal) {
-                const timeMatch = inVal.match(/(\d+):(\d+):(\d+)\s+(AM|PM)/i);
-                let h = parseInt(timeMatch[1]);
-                const m = parseInt(timeMatch[2]);
-                const ampm = timeMatch[4].toUpperCase();
-                if (ampm === 'PM' && h !== 12) h += 12;
-                if (ampm === 'AM' && h === 12) h = 0;
-                
+                const t = inVal.match(/(\d+):(\d+):(\d+)\s+(AM|PM)/i);
+                let h = parseInt(t[1]); const m = parseInt(t[2]); const ampm = t[4].toUpperCase();
+                if (ampm === 'PM' && h !== 12) h += 12; if (ampm === 'AM' && h === 12) h = 0;
                 const newAction = (h > 8 || (h === 8 && m >= 1)) ? 'Time In (Late)' : 'Time In';
-                
-                logs.push({
-                    name: student.name || 'Unknown',
-                    id: student.id,
-                    action: newAction,
-                    time: inVal.toUpperCase(),
-                    date: dateStr,
-                    details: null
-                });
+                logs.push({ name: student.name || 'Unknown', id: student.id, action: newAction, time: inVal.toUpperCase(), date: dateStr, details: null });
             }
-            
             if (outVal) {
-                const timeMatch = outVal.match(/(\d+):(\d+):(\d+)\s+(AM|PM)/i);
-                let h = parseInt(timeMatch[1]);
-                const ampm = timeMatch[4].toUpperCase();
-                if (ampm === 'PM' && h !== 12) h += 12;
-                if (ampm === 'AM' && h === 12) h = 0;
-                
+                const t = outVal.match(/(\d+):(\d+):(\d+)\s+(AM|PM)/i);
+                let h = parseInt(t[1]); const ampm = t[4].toUpperCase();
+                if (ampm === 'PM' && h !== 12) h += 12; if (ampm === 'AM' && h === 12) h = 0;
                 const newAction = (h >= 0 && h <= 4) ? 'Time Out (Late)' : 'Time Out';
-
-                logs.push({
-                    name: student.name || 'Unknown',
-                    id: student.id,
-                    action: newAction,
-                    time: outVal.toUpperCase(),
-                    date: dateStr,
-                    details: { gcHandle: gcHandle, announcement: ann, whoPosted: post }
-                });
+                logs.push({ name: student.name || 'Unknown', id: student.id, action: newAction, time: outVal.toUpperCase(), date: dateStr, details: { gcHandle: gcHandle, announcement: ann, whoPosted: post } });
             }
         }
 
         localStorage.setItem('attendanceLogs', JSON.stringify(logs));
         
-        // 2. Push to Supabase and wait 800ms
         await pushLogsToCloud();
         await new Promise(resolve => setTimeout(resolve, 800));
 
-    } catch(e) { 
-        console.error("Cloud push failed:", e); 
-    } finally {
-        // --- 3. Stop Animation, Reset Button, and Refresh ---
+    } catch(e) { console.error(e); } finally {
         if (saveBtn) {
             clearInterval(animInterval);
             saveBtn.textContent = "Save Changes";
