@@ -1996,6 +1996,10 @@ function renderLogs() {
     });
 
     filteredLogs.forEach(log => {
+        
+        // 🟢 THIS WAS THE MISSING LINE THAT CRASHED THE TABLE 🟢
+        const safeId = String(log.id).replace(/'/g, "\\'");
+        
         const tr = document.createElement('tr');
         
         let statusColor = 'var(--text-main)';
@@ -2007,7 +2011,7 @@ function renderLogs() {
 
         let todayShiftBtn = '';
         if ((log.action.includes('Out') || log.action.includes('Exempted')) && log.details) {
-            todayShiftBtn = `<button onclick="viewTodayShift('${log.id}', '${log.date}')" style="background: rgba(var(--accent-rgb), 0.1); color: var(--accent); padding: 5px 10px; border-radius: 4px; font-size: 10px; font-weight: bold; border: 1px solid var(--accent); margin-right: 8px; cursor: pointer;">TODAY SHIFT</button>`;
+            todayShiftBtn = `<button onclick="viewTodayShift('${safeId}', '${log.date}')" style="background: rgba(var(--accent-rgb), 0.1); color: var(--accent); padding: 5px 10px; border-radius: 4px; font-size: 10px; font-weight: bold; border: 1px solid var(--accent); margin-right: 8px; cursor: pointer;">TODAY SHIFT</button>`;
         }
 
         tr.innerHTML = `
