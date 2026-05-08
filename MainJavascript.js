@@ -2819,11 +2819,11 @@ function renderDashboardSummary() {
     if (!isAuthenticated()) return;
     const students = JSON.parse(localStorage.getItem('students')) || [];
     const logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
-    
+
     const shift = getShiftDateDetails();
     const todayStr = shift.dateStr;
     const targetDayStr = shift.dayStr;
-    const now = getPHT().getTime(); 
+    const now = getPHT().getTime();
 
     const validStudents = students.filter(s => s.id !== 'SYS_CONFIG_X99' && s.id !== 'SYS_WIPE_ALL');
     const total = validStudents.length;
@@ -2848,7 +2848,7 @@ function renderDashboardSummary() {
         if (hasIn || isExempt) {
             present++;
             if (isLate) late++;
-            
+
             const lvl = (s.classLevel || 'UpperClassmen').toLowerCase();
             if (lvl === 'freshmen') freshPresent++;
             else upperPresent++;
@@ -2873,11 +2873,11 @@ function renderDashboardSummary() {
         const onTimeCount = present - late;
         const onTimePct = (onTimeCount / totalScheduled) * 100;
         const latePct = (late / totalScheduled) * 100;
-        const combinedPresentPct = onTimePct + latePct; 
-        
+        const combinedPresentPct = onTimePct + latePct;
+
         pieChart.style.background = `conic-gradient(
-            var(--success) 0% ${onTimePct}%, 
-            #f59e0b ${onTimePct}% ${combinedPresentPct}%, 
+            var(--success) 0% ${onTimePct}%,
+            #f59e0b ${onTimePct}% ${combinedPresentPct}%,
             var(--error) ${combinedPresentPct}% 100%
         )`;
     } else if (pieChart) {
@@ -2890,22 +2890,22 @@ function renderDashboardSummary() {
     if (barChartEl && barLabelsEl) {
         barChartEl.innerHTML = '';
         barLabelsEl.innerHTML = '';
-        
+
         const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-        let maxPresent = 100; 
-        
+        let maxPresent = 100;
+
         for (let i = 6; i >= 0; i--) {
             let d = new Date(getPHT());
             d.setDate(d.getDate() - i);
             let dStr = d.toLocaleDateString('en-US');
             let dayIdx = d.getDay();
-            
+
             let pCount = logs.filter(l => l.date === dStr && (l.action.includes('Time In') || l.action.includes('Exempted')) && l.id !== 'SYS_DELETED_DATE').length;
-            
+
             let heightPct = (pCount / maxPresent) * 100;
-            if (heightPct > 100) heightPct = 100; 
-            if (heightPct < 5) heightPct = 5; 
-            
+            if (heightPct > 100) heightPct = 100;
+            if (heightPct < 5) heightPct = 5;
+
             barChartEl.innerHTML += `
                 <div style="flex: 1; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; position: relative;">
                     <span style="position: absolute; top: -20px; font-size: 11px; color: var(--text-main); font-weight: bold;">${pCount}</span>
@@ -2919,10 +2919,10 @@ function renderDashboardSummary() {
     // 5. Draw Hourly Trend Line Chart
     const timeInLogs = todayLogs.filter(l => l.action.includes('Time In') && !l.action.includes('Exempted'));
     const timeOutLogs = todayLogs.filter(l => l.action.includes('Time Out') && !l.action.includes('Exempted'));
-    
+
     const hourlyInCounts = new Array(24).fill(0);
     const hourlyOutCounts = new Array(24).fill(0);
-    
+
     const populateCounts = (targetLogs, arr) => {
         targetLogs.forEach(log => {
             if(log.time === 'Exempted') return;
@@ -2936,15 +2936,15 @@ function renderDashboardSummary() {
             }
         });
     };
-    
+
     populateCounts(timeInLogs, hourlyInCounts);
     populateCounts(timeOutLogs, hourlyOutCounts);
 
     const lineChartContainer = document.getElementById('dash-line-chart-container');
     if (lineChartContainer) {
-        const maxLineVal = 25; 
+        const maxLineVal = 25;
         let svgHTML = `<svg width="100%" height="100%" viewBox="-40 -20 1080 260" preserveAspectRatio="none" style="flex: 1; display: block; overflow: visible;">`;
-        
+
         for(let val = 0; val <= 25; val += 5) {
             let yLine = 200 - ((val / maxLineVal) * 200);
             svgHTML += `<line x1="0" y1="${yLine}" x2="1000" y2="${yLine}" stroke="rgba(255,255,255,0.1)" stroke-width="1.5" />`;
@@ -2953,22 +2953,22 @@ function renderDashboardSummary() {
 
         let inPoints = []; let outPoints = [];
         let inCircles = ''; let outCircles = '';
-        
+
         for(let h = 0; h < 24; h++) {
             let chartIdx = (h >= 4) ? (h - 4) : (h + 20);
             let inCount = hourlyInCounts[h];
             let outCount = hourlyOutCounts[h];
             let x = (chartIdx / 23) * 1000;
-            
+
             let inY = 200 - ((Math.min(inCount, maxLineVal) / maxLineVal) * 200);
             let outY = 200 - ((Math.min(outCount, maxLineVal) / maxLineVal) * 200);
-            
+
             inPoints.push(`${x},${inY}`);
             outPoints.push(`${x},${outY}`);
-            
+
             outCircles += `<circle cx="${x}" cy="${outY}" r="6" fill="#1e2128" stroke="var(--error)" stroke-width="2.5" />`;
             if (outCount > 0) outCircles += `<text x="${x}" y="${outY + 20}" fill="var(--error)" font-size="12" text-anchor="middle" font-weight="bold">${outCount}</text>`;
-            
+
             inCircles += `<circle cx="${x}" cy="${inY}" r="6" fill="#1e2128" stroke="var(--accent)" stroke-width="2.5" />`;
             if (inCount > 0) inCircles += `<text x="${x}" y="${inY - 12}" fill="var(--accent)" font-size="12" text-anchor="middle" font-weight="bold">${inCount}</text>`;
         }
@@ -2976,40 +2976,110 @@ function renderDashboardSummary() {
         svgHTML += `<polyline points="${outPoints.join(' ')}" fill="none" stroke="var(--error)" stroke-width="3.5" />`;
         svgHTML += `<polyline points="${inPoints.join(' ')}" fill="none" stroke="var(--accent)" stroke-width="3.5" />`;
         svgHTML += outCircles + inCircles + `</svg>`;
-        
+
         let labelsHTML = `<div style="display: flex; justify-content: space-between; margin-top: 15px; color: var(--text-muted); font-size: 11px; padding: 0;">`;
         ['4a','5a','6a','7a','8a','9a','10a','11a','12p','1p','2p','3p','4p','5p','6p','7p','8p','9p','10p','11p','12a','1a','2a','3a'].forEach(lbl => {
             labelsHTML += `<span style="flex: 1; text-align: center;">${lbl}</span>`;
         });
-        
+
         lineChartContainer.innerHTML = svgHTML + labelsHTML + `</div>`;
     }
 
-    // 6. Draw Inactive Students List
+    // --- 6. Draw Inactive Students List (Upgraded Tracker) ---
     const inactiveFreshmen = [];
     const inactiveUpper = [];
-    const cutoffDate = new Date(getPHT());
-    cutoffDate.setDate(cutoffDate.getDate() - 21);
+    const inactivePanel = document.getElementById('dash-inactive-freshmen')?.closest('.panel');
 
-    validStudents.forEach(s => {
-        const sLogs = logs.filter(l => String(l.id) === String(s.id));
-        let daysInactive = 999; 
-        if (sLogs.length > 0) {
-            const sortedLogs = sLogs.sort((a, b) => new Date(b.date) - new Date(a.date));
-            daysInactive = Math.floor((now - new Date(sortedLogs[0].date).getTime()) / (1000 * 60 * 60 * 24));
+    // A. Safely Inject the Start/Stop Button via JS
+    if (inactivePanel) {
+        let titleDiv = inactivePanel.querySelector('.inactive-header-wrap');
+        if (!titleDiv) {
+            const oldH3 = inactivePanel.querySelector('h3');
+            const oldP = inactivePanel.querySelector('p');
+
+            titleDiv = document.createElement('div');
+            titleDiv.className = 'inactive-header-wrap';
+            titleDiv.style.cssText = 'display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; flex-shrink: 0;';
+
+            titleDiv.innerHTML = `
+                <h3 style="margin: 0; color: #ef4444;">Inactive Students</h3>
+                <button id="inactivity-toggle-btn" onclick="toggleInactivityTracker()" style="font-size: 10px; padding: 4px 10px; border-radius: 4px; border: 1px solid var(--accent); background: rgba(var(--accent-rgb), 0.1); color: var(--accent); cursor: pointer; font-weight: bold; transition: 0.3s;"></button>
+            `;
+
+            inactivePanel.insertBefore(titleDiv, oldH3);
+            if (oldP) oldP.textContent = "Press START to count missed days. Students appear at Day 8.";
+            if (oldH3) oldH3.remove();
         }
+    }
 
-        if (daysInactive >= 8) {
-            const classLvl = (s.classLevel || 'UpperClassmen').toLowerCase();
-            const obj = { name: s.name || 'Unknown', days: daysInactive >= 999 ? "No logs" : `${daysInactive} days` };
-            if (classLvl === 'freshmen') inactiveFreshmen.push(obj); else inactiveUpper.push(obj);
+    // B. Calculate Tracker Days and Update Button
+    let tracker = JSON.parse(localStorage.getItem('inactivity_tracker') || '{"active": false, "startDate": null}');
+    const toggleBtn = document.getElementById('inactivity-toggle-btn');
+
+    // Hide button if Visitor
+    let tk = sessionStorage.getItem('_auth_tkn_x92');
+    let userRole = 'ADMIN';
+    try { userRole = JSON.parse(atob(tk)).role || 'ADMIN'; } catch(e) {}
+    if (toggleBtn) toggleBtn.style.display = userRole === 'VISITOR' ? 'none' : 'block';
+
+    let trackerDays = 0;
+    if (tracker.active && tracker.startDate) {
+        const startMs = new Date(tracker.startDate).getTime();
+        trackerDays = Math.floor((now - startMs) / (1000 * 60 * 60 * 24));
+        if (trackerDays < 0) trackerDays = 0;
+
+        if (toggleBtn) {
+            toggleBtn.textContent = `STOP - DAY ${trackerDays}`;
+            toggleBtn.style.color = "var(--error)";
+            toggleBtn.style.borderColor = "var(--error)";
+            toggleBtn.style.background = "rgba(239, 68, 68, 0.1)";
         }
-    });
+    } else {
+        if (toggleBtn) {
+            toggleBtn.textContent = "START";
+            toggleBtn.style.color = "var(--accent)";
+            toggleBtn.style.borderColor = "var(--accent)";
+            toggleBtn.style.background = "rgba(var(--accent-rgb), 0.1)";
+        }
+    }
 
+    // C. Process Students only if Tracker is Active
+    if (tracker.active) {
+        validStudents.forEach(s => {
+            const sLogs = logs.filter(l => String(l.id) === String(s.id) && (l.action.includes('Time In') || l.action.includes('Exempted')));
+
+            let daysInactive = trackerDays; // If 0 logs, default to the tracker's current day
+
+            if (sLogs.length > 0) {
+                const sortedLogs = sLogs.sort((a, b) => new Date(b.date) - new Date(a.date));
+                const lastLogMs = new Date(sortedLogs[0].date).getTime();
+                const daysSinceLastLog = Math.floor((now - lastLogMs) / (1000 * 60 * 60 * 24));
+
+                // Smart Logic: Takes the smaller number. Cures the "999 days" bug for new students!
+                daysInactive = Math.min(daysSinceLastLog, trackerDays);
+            }
+
+            // Only push to the list if they hit the 8-day threshold
+            if (daysInactive >= 8) {
+                const classLvl = (s.classLevel || 'UpperClassmen').toLowerCase();
+                const obj = { name: s.name || 'Unknown', days: `${daysInactive} days` };
+                if (classLvl === 'freshmen') inactiveFreshmen.push(obj); else inactiveUpper.push(obj);
+            }
+        });
+    }
+
+    // D. Render the Lists
     const renderInactive = (id, list) => {
         const container = document.getElementById(id);
         if (!container) return;
-        container.innerHTML = list.length === 0 ? '<span style="font-size: 11px; color: var(--text-muted);">None</span>' : '';
+
+        if (!tracker.active) {
+            container.innerHTML = '<span style="font-size: 11px; color: var(--text-muted); font-style: italic;">Tracker is stopped.</span>';
+            return;
+        }
+
+        container.innerHTML = list.length === 0 ? '<span style="font-size: 11px; color: var(--text-muted); font-style: italic;">No students at 8+ days yet.</span>' : '';
+
         list.forEach(item => {
             container.innerHTML += `
                 <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); padding: 6px 8px; border-radius: 4px; display: flex; justify-content: space-between; align-items: center;">
@@ -3018,6 +3088,7 @@ function renderDashboardSummary() {
                 </div>`;
         });
     };
+
     renderInactive('dash-inactive-freshmen', inactiveFreshmen);
     renderInactive('dash-inactive-upper', inactiveUpper);
 
@@ -3046,7 +3117,7 @@ function renderDashboardSummary() {
 
     perfList.sort((a, b) => b.rate - a.rate);
     const bestPerfEl = document.getElementById('dash-best-perf');
-    
+
     if (bestPerfEl) {
         bestPerfEl.innerHTML = '';
         if (perfList.length === 0) {
@@ -4478,4 +4549,33 @@ function showLoadingOverlay(message = "Processing...") {
 function hideLoadingOverlay() {
     const overlay = document.getElementById('global-loading-overlay');
     if (overlay) overlay.style.display = 'none';
+}
+
+function toggleInactivityTracker() {
+    if (!isAuthenticated()) return;
+    
+    // Security Check: Only Admins can click this
+    let tk = sessionStorage.getItem('_auth_tkn_x92');
+    let userRole = 'ADMIN';
+    try { userRole = JSON.parse(atob(tk)).role || 'ADMIN'; } catch(e) {}
+    if (userRole === 'VISITOR') {
+        alert("Access Denied: Only Support Heads can manage the tracker.");
+        return;
+    }
+
+    let tracker = JSON.parse(localStorage.getItem('inactivity_tracker') || '{"active": false, "startDate": null}');
+    
+    if (tracker.active) {
+        if (confirm("⚠️ WARNING ⚠️\n\nAre you sure you want to STOP the tracker?\n\nThis will reset all current tracking progress back to 0.")) {
+            localStorage.setItem('inactivity_tracker', JSON.stringify({ active: false, startDate: null }));
+            renderDashboardSummary();
+            forceInstantUIRefresh();
+        }
+    } else {
+        const shift = getShiftDateDetails();
+        // Start tracking from today
+        localStorage.setItem('inactivity_tracker', JSON.stringify({ active: true, startDate: shift.nowObj }));
+        renderDashboardSummary();
+        forceInstantUIRefresh();
+    }
 }
