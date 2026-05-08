@@ -1087,21 +1087,39 @@ async function logAttendanceAction(student, action, endOfShiftDetails = null, ov
     }
 }
 
-async function deleteLog(originalIndex) {
+async function deleteLog(idNum, dateStr) {
     if(!isAuthenticated()) return;
-    if (!confirm("Delete this attendance record?")) return;
-    
-    await pullFromCloud();
-    let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
-    logs.splice(originalIndex, 1); 
-    
-    localStorage.setItem('attendanceLogs', JSON.stringify(logs));
-    await pushLogsToCloud(); 
-    
-    renderLogs();
-    renderMainDashboard();
-    renderDashboardSummary(); 
-    renderDutyToday();
+
+    const confirmDelete = confirm("Are you sure you want to delete this attendance record?");
+    if (!confirmDelete) return;
+
+    // --- 1. Show the Localized Loading Spinner ---
+    const spinner = document.getElementById('live-log-spinner');
+    if (spinner) spinner.style.display = 'inline-block';
+
+    try {
+        // Lock the background sync immediately!
+        lastDataPushTime = Date.now(); 
+
+        let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
+        
+        // Remove the specific log
+        logs = logs.filter(l => !(String(l.id) === String(idNum) && l.date === dateStr));
+        
+        localStorage.setItem('attendanceLogs', JSON.stringify(logs));
+        
+        // --- 2. Push to Supabase and wait 800ms for visual feedback ---
+        await pushLogsToCloud();
+        await new Promise(resolve => setTimeout(resolve, 800));
+
+    } catch (e) {
+        console.error("Failed to delete log from cloud:", e);
+        alert("Error deleting log. Check your connection.");
+    } finally {
+        // --- 3. Hide Spinner and Instant Auto-Refresh ---
+        if (spinner) spinner.style.display = 'none';
+        forceInstantUIRefresh();
+    }
 }
 
 function deleteHistoryDate(dateStr, event) {
