@@ -163,7 +163,7 @@ input:focus, select:focus {
 
 .portal-mascot {
     position: absolute;
-    top: 0; 
+    top: -20%; 
     left: 27%; 
     
     transform: translate(-50%, calc(-100% + 35px)); 
