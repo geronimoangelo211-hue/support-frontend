@@ -163,15 +163,14 @@ input:focus, select:focus {
 
 .portal-mascot {
     position: absolute;
-    top: -25%;                
-    left: 27%;
+    top: 0; 
+    left: 27%; 
     
-    transform: translate(-50%, calc(-100% + 50px)); 
+    transform: translate(-50%, calc(-100% + 35px)); 
     
-    height: clamp(110px, 25vw, 160px); 
-    
-    z-index: -1;  
-    animation: floatIn 0.5s ease-out forwards; 
+    height: clamp(110px, 25vw, 160px);
+    z-index: -1;
+    animation: floatIn 0.5s ease-out forwards;
 }
 
 .centered-panel {
