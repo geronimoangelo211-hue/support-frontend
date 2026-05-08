@@ -4410,3 +4410,25 @@ function updateDailyMascot() {
         mascotImg.src = newSrc;
     }
 }
+
+setInterval(async () => {
+    if (isAuthenticated()) {
+        try {
+            if (typeof pushLogsToCloud === 'function') {
+                await pushLogsToCloud();
+            }
+            
+            if (typeof pushStudentsToCloud === 'function') {
+                await pushStudentsToCloud(); 
+            }
+            
+            if (typeof pushConfigToCloud === 'function') {
+                await pushConfigToCloud();
+            }
+            
+            
+        } catch (error) {
+            console.warn("Auto-save skipped/failed. Will retry in 10 seconds.", error);
+        }
+    }
+}, 10000);
