@@ -203,47 +203,42 @@ let lastConfigPushTime = 0;
 
 async function pullFromCloud() {
     try {
-        const response = await fetch(`${API_BASE_URL}/sync/pull`);
-        if (response.ok) {
-            const data = await response.json();
-            
-            const serverHasStudents = (data.students && data.students !== "[]" && data.students !== "null");
-            const serverHasLogs = (data.logs && data.logs !== "[]" && data.logs !== "null");
-
-            const localStudents = localStorage.getItem('students');
-            const localLogs = localStorage.getItem('attendanceLogs');
-
-            if (!serverHasStudents && !serverHasLogs && (localStudents || localLogs)) {
-                await pushLogsToCloud();
-                return; 
-            }
-
-            if (serverHasStudents) localStorage.setItem('students', data.students);
-            if (serverHasLogs) localStorage.setItem('attendanceLogs', data.logs);
-            
-            // FIX: Only overwrite the Lock Config if 5 seconds have passed since you clicked the switch
-            if (data.config && data.config !== "{}" && data.config !== "null") {
-                if (Date.now() - lastConfigPushTime > 5000) {
-                    localStorage.setItem('sys_config', data.config);
-                    applySystemConfig(); 
-                }
-            }
+        const response = await fetch('http://localhost:8080/api/sync/all'); 
+        
+        if (!response.ok) throw new Error("Server not responding correctly.");
+        
+        const serverData = await response.json();
+        
+        if (serverData.students && serverData.students.length > 0) {
+            localStorage.setItem('students', JSON.stringify(serverData.students));
         }
-    } catch (e) {
-        console.error("Cloud pull failed.", e);
+        
+        if (serverData.logs && serverData.logs.length > 0) {
+            localStorage.setItem('attendanceLogs', JSON.stringify(serverData.logs));
+        }
+
+    } catch (error) {
+        console.warn("Pull from cloud failed. Keeping local data safe.", error);
     }
 }
 
 async function pushStudentsToCloud() {
-    if (!isAuthenticated()) return; 
-    const data = JSON.parse(localStorage.getItem('students')) || [];
+    const localStudents = localStorage.getItem('students');
+    if (!localStudents || localStudents === "[]") return; // Don't push empty data
+
     try {
-        await fetch(`${API_BASE_URL}/students/sync`, {
+        const response = await fetch('http://localhost:8080/api/sync/students', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-Admin-Key': ADMIN_SECRET_KEY },
-            body: JSON.stringify(data)
+            headers: { 'Content-Type': 'application/json' },
+            body: localStudents
         });
-    } catch (err) {}
+
+        if (!response.ok) {
+            console.error("Failed to push students to server!");
+        }
+    } catch (error) {
+        console.error("Network error while pushing students.", error);
+    }
 }
 
 let lastDataPushTime = 0;
