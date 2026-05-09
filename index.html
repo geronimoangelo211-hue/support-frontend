@@ -182,6 +182,11 @@
 
     <main id="admin-login-view" class="view">
         <div class="centered-panel">
+            <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 25px; padding: 12px; background: rgba(0,0,0,0.3); border-radius: 8px; border: 1px solid #333a45;">
+                <div id="server-status-dot" style="width: 12px; height: 12px; border-radius: 50%;"></div>
+                <span id="server-status-text" style="font-size: 14px; font-weight: bold; font-family: monospace; letter-spacing: 0.5px;">Checking Server...</span>
+            </div>
+            
             <h3>Support Head Login</h3>
             <input type="text" id="admin-user" placeholder="Username">
             
