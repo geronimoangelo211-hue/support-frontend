@@ -1834,6 +1834,10 @@ async function switchView(viewId) {
             setTimeout(initSliderCaptcha, 50); 
         }
         checkBackendLockStatus(); 
+    } 
+    // 🟢 THIS TRIGGERS THE SERVER BOOT CHECKER 🟢
+    else if (viewId === 'admin-login-view') {
+        checkServerStatus(); 
     }
     
     generateAdminCaptcha();
@@ -1857,10 +1861,7 @@ async function switchView(viewId) {
         } catch(e) {}
         
         enforceHistoryLimit();
-        renderStudents();
-        renderLogs();
-        renderMainDashboard(); 
-        renderDutyToday(); 
+        forceInstantUIRefresh(); // Refreshes all active dashboard tabs instantly
         checkBackendLockStatus(); 
     } else {
         document.body.classList.add('portal-mode'); 
@@ -4578,4 +4579,79 @@ function toggleInactivityTracker() {
         renderDashboardSummary();
         forceInstantUIRefresh();
     }
+}
+
+let serverStatusCheckTimer = null;
+let serverTextCycleTimer = null;
+
+function checkServerStatus() {
+    const dot = document.getElementById('server-status-dot');
+    const text = document.getElementById('server-status-text');
+    const loginBtn = document.querySelector('#admin-login-view .btn-primary');
+    
+    if (!dot || !text) return;
+
+    // Reset old timers if any
+    clearInterval(serverStatusCheckTimer);
+    clearInterval(serverTextCycleTimer);
+    
+    const bootMessages = [
+        "Server Rebooting...", 
+        "Added Database...", 
+        "Please wait...", 
+        "One moment...", 
+        "Cache cleaning..."
+    ];
+    let msgIndex = 0;
+
+    // 1. Set Initial Offline/Booting State
+    dot.style.backgroundColor = '#f59e0b'; // Orange
+    dot.style.boxShadow = '0 0 8px #f59e0b';
+    dot.style.animation = 'pulse-server 1.5s infinite';
+    text.style.color = '#f59e0b';
+    text.textContent = bootMessages[0];
+    
+    if (loginBtn) {
+        loginBtn.disabled = true;
+        loginBtn.style.opacity = '0.4';
+        loginBtn.textContent = 'WAKING SERVER...';
+    }
+
+    // 2. Cycle the requested text every 3 seconds
+    serverTextCycleTimer = setInterval(() => {
+        msgIndex = (msgIndex + 1) % bootMessages.length;
+        text.textContent = bootMessages[msgIndex];
+    }, 3000);
+
+    // 3. Actively Ping the Server
+    const pingBackend = async () => {
+        try {
+            // Ping the backend. If it responds with ANYTHING, it's fully awake!
+            const res = await fetch(`${API_BASE_URL}/accounts`, { cache: 'no-store' });
+            
+            if (res.ok || res.status === 401 || res.status === 403) { 
+                clearInterval(serverTextCycleTimer);
+                clearInterval(serverStatusCheckTimer);
+                
+                // Switch to Online State
+                dot.style.backgroundColor = 'var(--success, #22c55e)'; // Green
+                dot.style.boxShadow = '0 0 10px var(--success, #22c55e)';
+                dot.style.animation = 'none';
+                text.style.color = 'var(--success, #22c55e)';
+                text.textContent = 'Server Online';
+                
+                // Unlock Login Button
+                if (loginBtn) {
+                    loginBtn.disabled = false;
+                    loginBtn.style.opacity = '1';
+                    loginBtn.textContent = 'Login';
+                }
+            }
+        } catch (error) {
+            // Server is still asleep/booting. Do nothing, let the text keep cycling.
+        }
+    };
+
+    pingBackend(); // Ping immediately
+    serverStatusCheckTimer = setInterval(pingBackend, 5000); // Ping every 5 seconds until awake
 }
