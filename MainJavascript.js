@@ -1448,6 +1448,7 @@ async function handleTimeIn() {
     const btnIn = document.querySelector('.btn-in');
     let animInterval;
 
+    // --- 1. Lock Button & Animate ---
     if (btnIn) {
         if (btnIn.disabled) return;
         btnIn.disabled = true;
@@ -1459,6 +1460,7 @@ async function handleTimeIn() {
         }, 500);
     }
 
+    // Helper function to explicitly unlock the button
     const stopAnim = () => {
         if (btnIn) {
             clearInterval(animInterval);
@@ -1469,49 +1471,115 @@ async function handleTimeIn() {
     };
 
     try {
-        // 1. Instant Local Validation (No waiting for Cloud!)
+        await pullFromCloud();
+
         const idInput = document.getElementById('student-id-input'); 
         const messageEl = document.getElementById('student-message');
 
         if (!idInput || !messageEl) { stopAnim(); return; }
         const studentId = idInput.value.trim();
 
-        if (!studentId) { messageEl.textContent = "Please enter your Student ID Number."; messageEl.className = "message error"; stopAnim(); return; }
+        if (!studentId) {
+            messageEl.textContent = "Please enter your Student ID Number.";
+            messageEl.className = "message error";
+            stopAnim(); // 🟢 INSTANT UNLOCK
+            return;
+        }
 
         const timeWindow = getCurrentTimeWindow();
-        if (timeWindow === "TOO_EARLY") { messageEl.textContent = "Shift has not started yet. Time In opens at 5:00 AM."; messageEl.className = "message error"; stopAnim(); return; }
-        if (timeWindow === "LOCKOUT") { messageEl.textContent = "System Locked (12:01 PM - 4:59 PM). If you missed Time In, you are marked Absent."; messageEl.className = "message error"; stopAnim(); return; }
-        if (timeWindow === "TIME_OUT_NORMAL" || timeWindow === "TIME_OUT_LATE") { messageEl.textContent = "Time In is closed for this shift. It is currently the Time Out period."; messageEl.className = "message error"; stopAnim(); return; }
 
-        let actionStr = timeWindow === "TIME_IN_LATE" ? "Time In (Late)" : "Time In";
+        if (timeWindow === "TOO_EARLY") {
+            messageEl.textContent = "Shift has not started yet. Time In opens at 5:00 AM.";
+            messageEl.className = "message error";
+            stopAnim(); // 🟢 INSTANT UNLOCK
+            return;
+        }
+        if (timeWindow === "LOCKOUT") {
+            messageEl.textContent = "System Locked (12:01 PM - 4:59 PM). If you missed Time In, you are marked Absent.";
+            messageEl.className = "message error";
+            stopAnim(); // 🟢 INSTANT UNLOCK
+            return;
+        }
+        if (timeWindow === "TIME_OUT_NORMAL" || timeWindow === "TIME_OUT_LATE") {
+            messageEl.textContent = "Time In is closed for this shift. It is currently the Time Out period.";
+            messageEl.className = "message error";
+            stopAnim(); // 🟢 INSTANT UNLOCK
+            return;
+        }
+
+        let actionStr = "Time In";
+        if (timeWindow === "TIME_IN_LATE") {
+            actionStr = "Time In (Late)";
+        }
+
         const students = JSON.parse(localStorage.getItem('students')) || [];
         let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
         const shift = getShiftDateDetails();
 
         const student = students.find(s => String(s.id).toLowerCase() === studentId.toLowerCase());
-        if (!student) { messageEl.textContent = "Student ID not found. Please register first."; messageEl.className = "message error"; stopAnim(); return; }
-        if (!student.assignedDays || !student.assignedDays.includes(shift.dayStr)) { messageEl.textContent = `You are not scheduled for duty today (${shift.dayStr}).`; messageEl.className = "message error"; stopAnim(); return; }
+        
+        if (!student) {
+            messageEl.textContent = "Student ID not found. Please register first.";
+            messageEl.className = "message error";
+            stopAnim(); // 🟢 INSTANT UNLOCK
+            return;
+        }
 
-        const alreadyTimedIn = logs.some(l => String(l.id).toLowerCase() === studentId.toLowerCase() && l.date === shift.dateStr && l.action.includes('Time In'));
-        if (alreadyTimedIn) { messageEl.textContent = "You have already timed in for this shift."; messageEl.className = "message error"; stopAnim(); return; }
+        if (!student.assignedDays || !student.assignedDays.includes(shift.dayStr)) {
+            messageEl.textContent = `You are not scheduled for duty today (${shift.dayStr}).`;
+            messageEl.className = "message error";
+            stopAnim(); // 🟢 INSTANT UNLOCK
+            return;
+        }
 
-        // 2. Save Locally Instantly
-        logs.push({ name: student.name, id: student.id, action: actionStr, time: shift.realTimeStr, date: shift.dateStr, details: null });
+        const alreadyTimedIn = logs.some(l => 
+            String(l.id).toLowerCase() === studentId.toLowerCase() && 
+            l.date === shift.dateStr && 
+            l.action.includes('Time In')
+        );
+
+        if (alreadyTimedIn) {
+            messageEl.textContent = "You have already timed in for this shift.";
+            messageEl.className = "message error";
+            stopAnim(); // 🟢 INSTANT UNLOCK
+            return;
+        }
+
+        const newLog = {
+            name: student.name,
+            id: student.id,
+            action: actionStr,
+            time: shift.realTimeStr,
+            date: shift.dateStr,
+            details: null
+        };
+
+        logs.push(newLog);
+
         localStorage.setItem('attendanceLogs', JSON.stringify(logs));
         localStorage.setItem('activeDeviceStudent', student.id);
         
-        // 3. Unlock UI and Show Success Instantly
         messageEl.textContent = `Success: ${student.name} - ${actionStr} at ${shift.realTimeStr}`;
         messageEl.className = "message success";
         idInput.value = ''; 
+
+        await pushLogsToCloud();
+        await new Promise(resolve => setTimeout(resolve, 800));
+
         checkDeviceLock(); 
-        forceInstantUIRefresh();
-        stopAnim();
+        
+        try {
+            if (typeof renderAttendanceLogs === 'function') renderAttendanceLogs();
+            if (typeof renderDashboardSummary === 'function') renderDashboardSummary();
+            if (typeof renderAttendanceSummary === 'function') renderAttendanceSummary();
+        } catch(e) {}
 
-        // 4. Background Cloud Sync (Runs invisibly! Student does not wait)
-        pullFromCloud().then(() => pushLogsToCloud()).catch(e => console.log("Background sync pending..."));
+        stopAnim(); // 🟢 Final Unlock after success!
 
-    } catch (error) { stopAnim(); }
+    } catch (error) {
+        console.error(error);
+        stopAnim(); // 🟢 Failsafe Unlock
+    }
 }
 
 function getShiftDateDetails() {
@@ -4151,6 +4219,7 @@ async function handleTimeOut() {
     const btnOut = document.querySelector('.btn-out');
     let animInterval;
     
+    // --- 1. Lock Button & Animate ---
     if (btnOut) {
         if (btnOut.disabled) return; 
         btnOut.disabled = true;
@@ -4162,6 +4231,7 @@ async function handleTimeOut() {
         }, 500);
     }
 
+    // Helper function to explicitly unlock the button
     const stopAnim = () => {
         if (btnOut) {
             clearInterval(animInterval);
@@ -4172,65 +4242,128 @@ async function handleTimeOut() {
     };
 
     try {
-        // 1. Instant Local Validation
+        await pullFromCloud();
+
         const idInput = document.getElementById('student-id-input'); 
         const messageEl = document.getElementById('student-message');
 
         if (!idInput || !messageEl) { stopAnim(); return; }
         const studentId = idInput.value.trim();
 
-        if (!studentId) { messageEl.textContent = "Please enter your Student ID Number."; messageEl.className = "message error"; stopAnim(); return; }
+        if (!studentId) {
+            messageEl.textContent = "Please enter your Student ID Number.";
+            messageEl.className = "message error";
+            stopAnim(); // 🟢 INSTANT UNLOCK
+            return;
+        }
 
         const timeWindow = getCurrentTimeWindow();
-        if (timeWindow === "LOCKOUT") { messageEl.textContent = "System Locked (12:01 PM - 4:59 PM). Time Out opens at 5:00 PM."; messageEl.className = "message error"; stopAnim(); return; }
-        if (timeWindow === "TIME_IN_NORMAL" || timeWindow === "TIME_IN_LATE" || timeWindow === "TOO_EARLY") { messageEl.textContent = "It is too early to Time Out. Time Out opens at 5:00 PM."; messageEl.className = "message error"; stopAnim(); return; }
 
-        let actionStr = timeWindow === "TIME_OUT_LATE" ? "Time Out (Late)" : "Time Out";
+        if (timeWindow === "LOCKOUT") {
+            messageEl.textContent = "System Locked (12:01 PM - 4:59 PM). Time Out opens at 5:00 PM.";
+            messageEl.className = "message error";
+            stopAnim(); // 🟢 INSTANT UNLOCK
+            return;
+        }
+        if (timeWindow === "TIME_IN_NORMAL" || timeWindow === "TIME_IN_LATE" || timeWindow === "TOO_EARLY") {
+            messageEl.textContent = "It is too early to Time Out. Time Out opens at 5:00 PM.";
+            messageEl.className = "message error";
+            stopAnim(); // 🟢 INSTANT UNLOCK
+            return;
+        }
+
+        let actionStr = "Time Out";
+        if (timeWindow === "TIME_OUT_LATE") actionStr = "Time Out (Late)";
+
         const students = JSON.parse(localStorage.getItem('students')) || [];
         let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
         const shift = getShiftDateDetails();
 
         const student = students.find(s => String(s.id).toLowerCase() === studentId.toLowerCase());
-        if (!student) { messageEl.textContent = "Student ID not found. Please register first."; messageEl.className = "message error"; stopAnim(); return; }
-        if (!student.assignedDays || !student.assignedDays.includes(shift.dayStr)) { messageEl.textContent = `You are not scheduled for duty today (${shift.dayStr}).`; messageEl.className = "message error"; stopAnim(); return; }
+        
+        if (!student) {
+            messageEl.textContent = "Student ID not found. Please register first.";
+            messageEl.className = "message error";
+            stopAnim(); // 🟢 INSTANT UNLOCK
+            return;
+        }
+
+        if (!student.assignedDays || !student.assignedDays.includes(shift.dayStr)) {
+            messageEl.textContent = `You are not scheduled for duty today (${shift.dayStr}).`;
+            messageEl.className = "message error";
+            stopAnim(); // 🟢 INSTANT UNLOCK
+            return;
+        }
 
         const hasTimedIn = logs.some(l => String(l.id).toLowerCase() === studentId.toLowerCase() && l.date === shift.dateStr && l.action.includes('Time In'));
-        if (!hasTimedIn) { messageEl.textContent = "You cannot Time Out because you have no Time In record for today."; messageEl.className = "message error"; stopAnim(); return; }
+        if (!hasTimedIn) {
+            messageEl.textContent = "You cannot Time Out because you have no Time In record for today.";
+            messageEl.className = "message error";
+            stopAnim(); // 🟢 INSTANT UNLOCK
+            return;
+        }
 
         const alreadyTimedOut = logs.some(l => String(l.id).toLowerCase() === studentId.toLowerCase() && l.date === shift.dateStr && l.action.includes('Time Out'));
-        if (alreadyTimedOut) { messageEl.textContent = "You have already timed out for this shift."; messageEl.className = "message error"; stopAnim(); return; }
+        if (alreadyTimedOut) {
+            messageEl.textContent = "You have already timed out for this shift.";
+            messageEl.className = "message error";
+            stopAnim(); // 🟢 INSTANT UNLOCK
+            return;
+        }
 
-        // 2. Stop Animation instantly and open modal
+        // Validation passed! Stop checking animation before opening modal.
         stopAnim();
+
+        // --- Open Modal and wait for user ---
         const reportData = await askForShiftReport(student.gcHandle, student.name);
-        if (!reportData) return; 
+        if (!reportData) return; // User clicked cancel
 
         try {
-            // 3. Save Locally Instantly
-            logs.push({
-                name: student.name, id: student.id, action: actionStr, time: shift.realTimeStr, date: shift.dateStr,
-                details: { gcHandle: reportData.gc, announcement: reportData.ann, whoPosted: reportData.name } 
-            });
+            const newLog = {
+                name: student.name,
+                id: student.id,
+                action: actionStr,
+                time: shift.realTimeStr,
+                date: shift.dateStr,
+                details: {
+                    gcHandle: reportData.gc,
+                    announcement: reportData.ann,
+                    whoPosted: reportData.name
+                } 
+            };
 
+            logs.push(newLog);
             localStorage.setItem('attendanceLogs', JSON.stringify(logs));
             localStorage.removeItem('activeDeviceStudent');
             
-            // 4. Show Success Instantly
+            try {
+                await pushLogsToCloud();
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            } catch (e) {
+                console.error("Cloud push failed:", e);
+            }
+            
             checkDeviceLock(); 
             messageEl.textContent = `Success: Shift Report submitted and Time Out recorded!`;
             messageEl.className = "message success";
             idInput.value = ''; 
-            forceInstantUIRefresh();
 
-            // 5. Background Cloud Sync
-            pullFromCloud().then(() => pushLogsToCloud()).catch(e => console.log("Background sync pending..."));
-            
+            try {
+                if (typeof renderAttendanceLogs === 'function') renderAttendanceLogs();
+                if (typeof renderDashboardSummary === 'function') renderDashboardSummary();
+                if (typeof renderAttendanceSummary === 'function') renderAttendanceSummary();
+            } catch(e) {}
+
         } finally {
-            // Guarantee Modal Closes
+            // The master kill switch for the modal overlay
             const modal = document.getElementById('shift-report-modal');
             if (modal) modal.remove();
         }
-    } catch (error) { stopAnim(); }
+
+    } catch (error) {
+        console.error(error);
+        stopAnim(); // 🟢 Failsafe Unlock
+    }
 }
 
 function askForShiftReport(defaultGc) {
