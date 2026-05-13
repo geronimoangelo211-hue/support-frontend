@@ -230,7 +230,7 @@
                             <span id="display-role" style="color: var(--text-muted); font-size: 10px; line-height: 1.2; text-transform: uppercase;"></span>
                         </div>
                     
-                        <div class="logout-btn" onclick="logoutAdmin()" style="background: rgba(239, 68, 68, 0.1); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.5); padding: 8px 18px; border-radius: 6px; font-weight: bold; font-size: 13px; cursor: pointer; transition: 0.2s; margin-left: 5px; display: flex; align-items: center; justify-content: center;" onmouseover="this.style.background='rgba(239, 68, 68, 0.2)'" onmouseout="this.style.background='rgba(239, 68, 68, 0.1)'">
+                        <div class="admin-nav-item logout-btn" onclick="logoutAdmin()" style="background: rgba(239, 68, 68, 0.1); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.5); padding: 8px 18px; border-radius: 6px; font-weight: bold; font-size: 13px; cursor: pointer; transition: 0.2s; margin-left: 5px; margin-right: 20px; display: flex; align-items: center; justify-content: center;" onmouseover="this.style.background='rgba(239, 68, 68, 0.2)'" onmouseout="this.style.background='rgba(239, 68, 68, 0.1)'">
                             Logout
                         </div>
                     </div>
@@ -374,6 +374,23 @@
                             <div>
                                 <h1 style="margin: 0; color: var(--accent); white-space: nowrap;">Live Attendance</h1>
                                 <p style="margin: 5px 0 0 0; color: var(--text-muted); font-size: 13px; white-space: nowrap;">Monitor today's scheduled students and real-time logs.</p>
+                            </div>
+
+                            <div style="display: flex; gap: 15px; background: rgba(0,0,0,0.2); padding: 10px 20px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.05);">
+                                <div style="text-align: center;">
+                                    <span style="display: block; font-size: 10px; color: var(--text-muted); text-transform: uppercase;">Completed Shifts</span>
+                                    <span id="live-completed-total" style="font-size: 1.2rem; font-weight: bold; color: var(--success);">0</span>
+                                </div>
+                                <div style="width: 1px; background: rgba(255,255,255,0.1);"></div>
+                                <div style="text-align: center;">
+                                    <span style="display: block; font-size: 10px; color: #a855f7; text-transform: uppercase;">Upper</span>
+                                    <span id="live-completed-upper" style="font-size: 1.2rem; font-weight: bold; color: #a855f7;">0</span>
+                                </div>
+                                <div style="width: 1px; background: rgba(255,255,255,0.1);"></div>
+                                <div style="text-align: center;">
+                                    <span style="display: block; font-size: 10px; color: #66fcf1; text-transform: uppercase;">Freshmen</span>
+                                    <span id="live-completed-fresh" style="font-size: 1.2rem; font-weight: bold; color: #66fcf1;">0</span>
+                                </div>
                             </div>
                             
                             <div style="display: flex; gap: 10px; width: 100%; max-width: 500px;">
