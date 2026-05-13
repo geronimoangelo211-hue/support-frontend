@@ -4979,7 +4979,6 @@ function animateCounting(elementId, startValue, endValue) {
     const el = document.getElementById(elementId);
     if (!el) return;
     
-    // Stop any existing animation if the user clicks very fast
     clearInterval(perfAnimTimer);
     let currentVal = startValue;
     
@@ -4990,7 +4989,7 @@ function animateCounting(elementId, startValue, endValue) {
     }
 
     const isCountingUp = endValue > startValue;
-    const speed = 25; // Speed of the +1 tick (25ms makes it smooth but readable)
+    const speed = 25; 
 
     perfAnimTimer = setInterval(() => {
         if (isCountingUp) {
@@ -5007,10 +5006,55 @@ function animateCounting(elementId, startValue, endValue) {
             }
         }
         
-        // Dynamically change color while it counts!
         let rateColor = currentVal >= 80 ? 'var(--success)' : (currentVal >= 50 ? '#f59e0b' : 'var(--error)');
         el.style.color = rateColor;
         el.textContent = currentVal + "%";
         
     }, speed);
 }
+
+async function updateActiveAdminsTracker() {
+    if (!isAuthenticated()) return;
+    
+    try {
+        const response = await fetch(`${API_BASE_URL}/accounts`, { cache: 'no-store' });
+        if (!response.ok) return;
+        
+        const data = await response.json();
+        let activeCount = 0;
+        const now = Date.now();
+        
+        data.forEach(account => {
+            if (account.lastOnline) {
+                const seconds = Math.floor((now - account.lastOnline) / 1000);
+                if (seconds < 60) { 
+                    activeCount++;
+                }
+            }
+        });
+        
+        const countEl = document.getElementById('active-admins-count');
+        if (countEl) {
+            countEl.textContent = activeCount;
+            
+
+            if (activeCount > 1) {
+                countEl.style.color = '#66fcf1'; 
+                countEl.style.textShadow = '0 0 8px rgba(102, 252, 241, 0.6)';
+            } else {
+                countEl.style.color = 'var(--text-muted)';
+                countEl.style.textShadow = 'none';
+            }
+        }
+    } catch (error) {
+        console.error("Tracker: Failed to sync active admins.");
+    }
+}
+
+setInterval(updateActiveAdminsTracker, 20000);
+
+document.addEventListener('DOMContentLoaded', () => {
+    if (isAuthenticated()) {
+        setTimeout(updateActiveAdminsTracker, 1000);
+    }
+});
