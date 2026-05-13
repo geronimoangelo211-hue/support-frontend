@@ -216,6 +216,7 @@
                     <div class="admin-nav-item" onclick="switchAdminSection('sec-data', this)">Students Data</div>
                     <div class="admin-nav-item" onclick="switchAdminSection('sec-schedule', this)">Students Schedule</div>
                     <div class="admin-nav-item" onclick="switchAdminSection('sec-history', this)">History</div>
+                    <div class="admin-nav-item" onclick="switchAdminSection('sec-performance', this)">Students Performance</div>
                     <div class="admin-nav-item" id="nav-settings-btn" onclick="switchAdminSection('sec-settings', this)">Settings</div>
                     
                     <div style="margin-left: auto; display: flex;">
@@ -612,6 +613,30 @@
                             </table>
                         </div>
                     </div>
+                </div>
+            </div>
+
+            <div id="sec-performance" class="admin-section">
+                <div class="dashboard-grid-layout" style="display: flex; flex-direction: row; gap: 30px; flex: 1; align-items: stretch;">
+                    
+                    <div class="panel" style="flex: 1; display: flex; flex-direction: column; overflow: hidden; max-width: 350px;">
+                        <h3 style="margin-top: 0;">Search Student</h3>
+                        <p class="placeholder-text" style="margin-top: 0; margin-bottom: 15px;">Find a student to view their metrics.</p>
+                        
+                        <input type="text" id="search-perf-student" placeholder="🔍 Search Name or ID..." oninput="renderPerfStudentList()" style="margin-bottom: 15px; padding: 10px; border-radius: 4px; border: 1px solid #333a45; background: #121419; color: white; outline: none; width: 100%; box-sizing: border-box;">
+                        
+                        <div class="list-container" style="flex: 1; overflow-y: auto; margin-top: 0; border: 1px solid #2d313c; border-radius: 6px;">
+                            <ul id="perf-students-list" style="list-style: none; padding: 0; margin: 0;"></ul>
+                        </div>
+                    </div>
+
+                    <div class="panel" style="flex: 2; display: flex; flex-direction: column; overflow-y: auto;">
+                        <h3 id="perf-detail-title" style="margin-top: 0; color: var(--accent);">Student Performance Overview</h3>
+                        <div id="perf-detail-content" style="display: flex; flex-direction: column; gap: 20px; flex: 1; margin-top: 10px;">
+                            <p class="placeholder-text" style="text-align: center; margin-top: 80px; font-size: 1.1rem;">👈 Select a student from the list to generate their report.</p>
+                        </div>
+                    </div>
+
                 </div>
             </div>
 
