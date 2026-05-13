@@ -1703,9 +1703,11 @@ function enforceHistoryLimit() {}
 
 function renderStudents() {
     if (!isAuthenticated()) return;
+    
     const students = JSON.parse(localStorage.getItem('students')) || [];
-    const tbody = document.getElementById('students-table-body'); 
-    if (!tbody) return;
+    
+    const listContainer = document.getElementById('registered-students-list');
+    if (!listContainer) return;
 
     const searchInput = document.getElementById('search-student');
     const query = searchInput ? searchInput.value.toLowerCase() : '';
@@ -1740,11 +1742,10 @@ function renderStudents() {
         validStudents.sort((a, b) => a.originalIndex - b.originalIndex); // Smallest index first
     }
 
-    // 5. Render to Table
-    tbody.innerHTML = '';
+    listContainer.innerHTML = '';
     
     if (validStudents.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; padding: 20px; color: var(--text-muted); font-style: italic;">No students found matching this filter.</td></tr>`;
+        listContainer.innerHTML = `<li style="text-align: center; padding: 20px; color: var(--text-muted); font-style: italic;">No students found matching this criteria.</li>`;
         return;
     }
 
@@ -1753,23 +1754,29 @@ function renderStudents() {
         const lvl = student.classLevel || 'UpperClassmen';
         const days = student.assignedDays && student.assignedDays.length > 0 ? student.assignedDays.join(', ') : 'None';
         
-        tbody.innerHTML += `
-            <tr style="border-bottom: 1px solid #2d313c;">
-                <td style="font-weight: bold; color: var(--text-main); padding: 10px;">${student.name || 'Unknown'}</td>
-                <td style="color: var(--text-muted);">${student.id}</td>
-                <td><span style="background: rgba(102, 252, 241, 0.1); color: var(--accent); padding: 3px 6px; border-radius: 4px; font-size: 11px; font-weight: bold;">${lvl}</span></td>
-                <td style="font-size: 11px; color: var(--text-muted);">${days}</td>
-                <td style="text-align: right;">
-                    <div class="button-cell-wrap" style="display: flex; justify-content: flex-end; gap: 10px;">
-                        <button class="admin-edit-icon" onclick="openEditStudentModal('${safeId}')" style="background: transparent; border: none; color: #f59e0b; cursor: pointer; font-weight: bold; font-size: 11px;">EDIT</button>
-                        <button class="remove-btn" onclick="deleteStudent('${safeId}')" style="background: rgba(239, 68, 68, 0.1); border: 1px solid var(--error); color: var(--error); padding: 4px 8px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 11px;">REMOVE</button>
-                    </div>
-                </td>
-            </tr>
+        const li = document.createElement('li');
+        li.style.cssText = "display: flex; justify-content: space-between; align-items: center; padding: 12px 10px; border-bottom: 1px solid #2d313c; transition: background 0.2s;";
+        
+        li.innerHTML = `
+            <div style="display: flex; flex-direction: column; gap: 5px;">
+                <span style="font-weight: bold; color: var(--text-main); font-size: 14px;">
+                    ${student.name || 'Unknown'} 
+                    <span style="font-size: 11px; color: var(--text-muted); font-weight: normal; margin-left: 5px;">(${student.id})</span>
+                </span>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <span style="background: rgba(102, 252, 241, 0.1); color: var(--accent); padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: bold;">${lvl}</span>
+                    <span style="font-size: 11px; color: var(--text-muted);">Days: ${days}</span>
+                </div>
+            </div>
+            <div style="display: flex; gap: 8px;">
+                <button class="admin-edit-icon" onclick="openEditStudentModal('${safeId}')" style="background: transparent; border: 1px solid #f59e0b; color: #f59e0b; padding: 5px 10px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 10px; transition: 0.2s;">EDIT</button>
+                <button class="remove-btn" onclick="deleteStudent('${safeId}')" style="background: rgba(239, 68, 68, 0.1); border: 1px solid var(--error); color: var(--error); padding: 5px 10px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 10px; transition: 0.2s;">REMOVE</button>
+            </div>
         `;
+        listContainer.appendChild(li);
     });
 
-    applyVisitorMode(); 
+    if (typeof applyVisitorMode === 'function') applyVisitorMode(); 
 }
 
 function searchStudents() {
