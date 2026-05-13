@@ -4692,7 +4692,9 @@ function renderPerfStudentList() {
     const validStudents = students.filter(s => s.id !== 'SYS_CONFIG_X99' && s.id !== 'SYS_WIPE_ALL');
     const logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
     const listEl = document.getElementById('perf-students-list');
+    
     const query = (document.getElementById('search-perf-student')?.value || '').toLowerCase();
+    const filterVal = document.getElementById('filter-perf-student')?.value || 'ALL';
 
     if (!listEl) return;
     listEl.innerHTML = '';
@@ -4702,11 +4704,23 @@ function renderPerfStudentList() {
     let uniqueDates = [...new Set(validLogs.map(l => l.date))];
 
     let filtered = validStudents;
+
     if (query) {
-        filtered = validStudents.filter(s => (s.name || '').toLowerCase().includes(query) || String(s.id).toLowerCase().includes(query));
+        filtered = filtered.filter(s => (s.name || '').toLowerCase().includes(query) || String(s.id).toLowerCase().includes(query));
     }
 
-    filtered.sort((a,b) => (a.name||'').localeCompare(b.name||''));
+    if (filterVal === 'UPPER') {
+        filtered = filtered.filter(s => (s.classLevel || 'UpperClassmen').toLowerCase() !== 'freshmen');
+    } else if (filterVal === 'FRESH') {
+        filtered = filtered.filter(s => (s.classLevel || 'UpperClassmen').toLowerCase() === 'freshmen');
+    }
+
+    if (filterVal === 'ZA') {
+        filtered.sort((a,b) => (b.name||'').localeCompare(a.name||''));
+    } else {
+        // Defaults to A-Z for everything else
+        filtered.sort((a,b) => (a.name||'').localeCompare(b.name||''));
+    }
 
     if (filtered.length === 0) {
         listEl.innerHTML = `<li style="padding: 15px; text-align: center; color: var(--text-muted); font-style: italic; font-size: 12px;">No students found.</li>`;
