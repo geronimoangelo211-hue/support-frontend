@@ -4777,8 +4777,8 @@ function renderPerfStudentDetails() {
         const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
         const dayStr = dayNames[d.getDay()];
 
+        // If they were scheduled for this day
         if (student.assignedDays && student.assignedDays.includes(dayStr)) {
-            // Check if they came in
             const hasIn = sLogs.some(l => l.date === dateStr && (l.action.includes('Time In') || l.action.includes('Exempted')));
             if (!hasIn) {
                 absents++;
@@ -4788,10 +4788,23 @@ function renderPerfStudentDetails() {
     });
 
     const totalActions = onTimeIn + lateIn + onTimeOut + lateOut;
-    let perfRate = totalActions > 0 ? (onTimeIn + onTimeOut) / totalActions * 100 : 0;
+    let perfRate = 0;
+    
+    if (totalActions === 0 && absents === 0) {
+        perfRate = 100;
+    } else if (totalActions > 0) {
+        perfRate = ((onTimeIn + onTimeOut) / totalActions) * 100;
+    } else {
+        perfRate = 0;
+    }
+    
     perfRate = Math.min(perfRate + bonus, 100);
     const finalRoundedRate = Math.round(perfRate);
-    const rateColor = perfRate >= 80 ? 'var(--success)' : (perfRate >= 50 ? '#f59e0b' : 'var(--error)');
+
+    const startValue = currentPerfRateTracker;
+    currentPerfRateTracker = finalRoundedRate; 
+    
+    const initialColor = startValue >= 80 ? 'var(--success)' : (startValue >= 50 ? '#f59e0b' : 'var(--error)');
 
     let absentHtml = '';
     if (absentDates.length === 0) {
@@ -4815,12 +4828,11 @@ function renderPerfStudentDetails() {
                 </div>
             </div>
             
-            <!-- 🟢 ADDED margin-right: 20px FOR THE GAP 🟢 -->
             <div style="text-align: right; background: rgba(0,0,0,0.2); padding: 10px 20px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.05); margin-right: 20px;">
                 <span style="display: block; font-size: 10px; color: var(--text-muted); text-transform: uppercase; font-weight: bold; margin-bottom: 2px;">Overall Rate</span>
                 
-                <!-- 🟢 ADDED id="perf-anim-target" and set initial to 0% 🟢 -->
-                <span id="perf-anim-target" style="font-size: 2.2rem; font-weight: bold; color: ${rateColor}; line-height: 1;">0%</span>
+                <!-- Starts at the PREVIOUS value so it can count up/down smoothly -->
+                <span id="perf-anim-target" style="font-size: 2.2rem; font-weight: bold; color: ${initialColor}; line-height: 1;">${startValue}%</span>
             </div>
         </div>
 
@@ -4855,5 +4867,48 @@ function renderPerfStudentDetails() {
         </div>
     `;
 
-    animateCounting("perf-anim-target", finalRoundedRate, 1200); 
+    animateCounting("perf-anim-target", startValue, finalRoundedRate); 
+}
+
+let currentPerfRateTracker = 0; 
+let perfAnimTimer = null;
+
+function animateCounting(elementId, startValue, endValue) {
+    const el = document.getElementById(elementId);
+    if (!el) return;
+    
+    // Stop any existing animation if the user clicks very fast
+    clearInterval(perfAnimTimer);
+    let currentVal = startValue;
+    
+    if (startValue === endValue) {
+        el.textContent = endValue + "%";
+        el.style.color = endValue >= 80 ? 'var(--success)' : (endValue >= 50 ? '#f59e0b' : 'var(--error)');
+        return;
+    }
+
+    const isCountingUp = endValue > startValue;
+    const speed = 25; // Speed of the +1 tick (25ms makes it smooth but readable)
+
+    perfAnimTimer = setInterval(() => {
+        if (isCountingUp) {
+            currentVal += 1;
+            if (currentVal >= endValue) {
+                currentVal = endValue;
+                clearInterval(perfAnimTimer);
+            }
+        } else {
+            currentVal -= 1;
+            if (currentVal <= endValue) {
+                currentVal = endValue;
+                clearInterval(perfAnimTimer);
+            }
+        }
+        
+        // Dynamically change color while it counts!
+        let rateColor = currentVal >= 80 ? 'var(--success)' : (currentVal >= 50 ? '#f59e0b' : 'var(--error)');
+        el.style.color = rateColor;
+        el.textContent = currentVal + "%";
+        
+    }, speed);
 }
