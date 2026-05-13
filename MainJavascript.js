@@ -2850,7 +2850,7 @@ function resetDevSettings() {
 }
 
 function renderMainDashboard() {
-    renderDashboardSummary(); // Keeps old button calls from breaking
+    renderDashboardSummary(); 
 }
 
 function renderDashboardSummary() {
@@ -2873,11 +2873,21 @@ function renderDashboardSummary() {
     let present = 0;
     let absent = 0;
     let late = 0;
+    
     let freshPresent = 0;
+    let expectedFreshmen = 0;
     let upperPresent = 0;
+    let expectedUpper = 0;
 
-    // 1. Calculate Core Stats
     scheduledStudents.forEach(s => {
+        const lvl = (s.classLevel || 'UpperClassmen').toLowerCase();
+        
+        if (lvl === 'freshmen') {
+            expectedFreshmen++;
+        } else {
+            expectedUpper++;
+        }
+
         const studentLogs = todayLogs.filter(l => String(l.id) === String(s.id));
         const hasIn = studentLogs.some(l => l.action.includes('Time In') && !l.action.includes('Exempted'));
         const isExempt = studentLogs.some(l => l.action.includes('Exempted'));
@@ -2887,7 +2897,6 @@ function renderDashboardSummary() {
             present++;
             if (isLate) late++;
 
-            const lvl = (s.classLevel || 'UpperClassmen').toLowerCase();
             if (lvl === 'freshmen') freshPresent++;
             else upperPresent++;
         } else {
@@ -2895,17 +2904,16 @@ function renderDashboardSummary() {
         }
     });
 
-    // 2. Update Top Number Cards
     if(document.getElementById('dash-total')) document.getElementById('dash-total').textContent = total;
     if(document.getElementById('dash-ratio')) document.getElementById('dash-ratio').textContent = `${present} / ${totalScheduled}`;
     if(document.getElementById('dash-rate')) document.getElementById('dash-rate').textContent = totalScheduled > 0 ? Math.round((present / totalScheduled) * 100) + '%' : '0%';
     if(document.getElementById('dash-present')) document.getElementById('dash-present').textContent = present;
     if(document.getElementById('dash-absent')) document.getElementById('dash-absent').textContent = absent;
     if(document.getElementById('dash-late')) document.getElementById('dash-late').textContent = late;
-    if(document.getElementById('dash-fresh-present')) document.getElementById('dash-fresh-present').textContent = freshPresent;
-    if(document.getElementById('dash-upper-present')) document.getElementById('dash-upper-present').textContent = upperPresent;
+    
+    if(document.getElementById('dash-fresh-present')) document.getElementById('dash-fresh-present').textContent = `${freshPresent} / ${expectedFreshmen}`;
+    if(document.getElementById('dash-upper-present')) document.getElementById('dash-upper-present').textContent = `${upperPresent} / ${expectedUpper}`;
 
-    // 3. Draw Pie Chart
     const pieChart = document.getElementById('dash-pie-chart');
     if (totalScheduled > 0 && pieChart) {
         const onTimeCount = present - late;
@@ -2922,7 +2930,6 @@ function renderDashboardSummary() {
         pieChart.style.background = `conic-gradient(#334155 0% 100%)`;
     }
 
-    // 4. Draw Weekly Bar Chart
     const barChartEl = document.getElementById('dash-bar-chart');
     const barLabelsEl = document.getElementById('dash-bar-labels');
     if (barChartEl && barLabelsEl) {
@@ -2954,7 +2961,6 @@ function renderDashboardSummary() {
         }
     }
 
-    // 5. Draw Hourly Trend Line Chart
     const timeInLogs = todayLogs.filter(l => l.action.includes('Time In') && !l.action.includes('Exempted'));
     const timeOutLogs = todayLogs.filter(l => l.action.includes('Time Out') && !l.action.includes('Exempted'));
 
@@ -3023,12 +3029,10 @@ function renderDashboardSummary() {
         lineChartContainer.innerHTML = svgHTML + labelsHTML + `</div>`;
     }
 
-    // --- 6. Draw Inactive Students List (Upgraded Tracker) ---
     const inactiveFreshmen = [];
     const inactiveUpper = [];
     const inactivePanel = document.getElementById('dash-inactive-freshmen')?.closest('.panel');
 
-    // A. Safely Inject the Start/Stop Button via JS
     if (inactivePanel) {
         let titleDiv = inactivePanel.querySelector('.inactive-header-wrap');
         if (!titleDiv) {
@@ -3050,11 +3054,9 @@ function renderDashboardSummary() {
         }
     }
 
-    // B. Calculate Tracker Days and Update Button
     let tracker = JSON.parse(localStorage.getItem('inactivity_tracker') || '{"active": false, "startDate": null}');
     const toggleBtn = document.getElementById('inactivity-toggle-btn');
 
-    // Hide button if Visitor
     let tk = sessionStorage.getItem('_auth_tkn_x92');
     let userRole = 'ADMIN';
     try { userRole = JSON.parse(atob(tk)).role || 'ADMIN'; } catch(e) {}
@@ -3081,23 +3083,20 @@ function renderDashboardSummary() {
         }
     }
 
-    // C. Process Students only if Tracker is Active
     if (tracker.active) {
         validStudents.forEach(s => {
             const sLogs = logs.filter(l => String(l.id) === String(s.id) && (l.action.includes('Time In') || l.action.includes('Exempted')));
 
-            let daysInactive = trackerDays; // If 0 logs, default to the tracker's current day
+            let daysInactive = trackerDays;
 
             if (sLogs.length > 0) {
                 const sortedLogs = sLogs.sort((a, b) => new Date(b.date) - new Date(a.date));
                 const lastLogMs = new Date(sortedLogs[0].date).getTime();
                 const daysSinceLastLog = Math.floor((now - lastLogMs) / (1000 * 60 * 60 * 24));
 
-                // Smart Logic: Takes the smaller number. Cures the "999 days" bug for new students!
                 daysInactive = Math.min(daysSinceLastLog, trackerDays);
             }
 
-            // Only push to the list if they hit the 8-day threshold
             if (daysInactive >= 8) {
                 const classLvl = (s.classLevel || 'UpperClassmen').toLowerCase();
                 const obj = { name: s.name || 'Unknown', days: `${daysInactive} days` };
@@ -3106,7 +3105,6 @@ function renderDashboardSummary() {
         });
     }
 
-    // D. Render the Lists
     const renderInactive = (id, list) => {
         const container = document.getElementById(id);
         if (!container) return;
@@ -3130,7 +3128,6 @@ function renderDashboardSummary() {
     renderInactive('dash-inactive-freshmen', inactiveFreshmen);
     renderInactive('dash-inactive-upper', inactiveUpper);
 
-    // 7. Draw Top 10 Best Performance
     let perfList = [];
     validStudents.forEach(student => {
         const studentLogs = logs.filter(l => String(l.id) === String(student.id));
