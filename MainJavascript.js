@@ -4627,7 +4627,6 @@ function checkServerStatus() {
     
     if (!dot || !text) return;
 
-    // Reset old timers if any
     clearInterval(serverStatusCheckTimer);
     clearInterval(serverTextCycleTimer);
     
@@ -4640,8 +4639,7 @@ function checkServerStatus() {
     ];
     let msgIndex = 0;
 
-    // 1. Set Initial Offline/Booting State
-    dot.style.backgroundColor = '#f59e0b'; // Orange
+    dot.style.backgroundColor = '#f59e0b'; 
     dot.style.boxShadow = '0 0 8px #f59e0b';
     dot.style.animation = 'pulse-server 1.5s infinite';
     text.style.color = '#f59e0b';
@@ -4653,30 +4651,25 @@ function checkServerStatus() {
         loginBtn.textContent = 'WAKING SERVER...';
     }
 
-    // 2. Cycle the requested text every 3 seconds
     serverTextCycleTimer = setInterval(() => {
         msgIndex = (msgIndex + 1) % bootMessages.length;
         text.textContent = bootMessages[msgIndex];
     }, 3000);
 
-    // 3. Actively Ping the Server
     const pingBackend = async () => {
         try {
-            // Ping the backend. If it responds with ANYTHING, it's fully awake!
             const res = await fetch(`${API_BASE_URL}/accounts`, { cache: 'no-store' });
             
             if (res.ok || res.status === 401 || res.status === 403) { 
                 clearInterval(serverTextCycleTimer);
                 clearInterval(serverStatusCheckTimer);
                 
-                // Switch to Online State
                 dot.style.backgroundColor = 'var(--success, #22c55e)'; // Green
                 dot.style.boxShadow = '0 0 10px var(--success, #22c55e)';
                 dot.style.animation = 'none';
                 text.style.color = 'var(--success, #22c55e)';
                 text.textContent = 'Server Online';
                 
-                // Unlock Login Button
                 if (loginBtn) {
                     loginBtn.disabled = false;
                     loginBtn.style.opacity = '1';
@@ -4684,11 +4677,10 @@ function checkServerStatus() {
                 }
             }
         } catch (error) {
-            // Server is still asleep/booting. Do nothing, let the text keep cycling.
         }
     };
 
-    pingBackend(); // Ping immediately
+    pingBackend(); 
     serverStatusCheckTimer = setInterval(pingBackend, 5000); // Ping every 5 seconds until awake
 }
 
@@ -4698,11 +4690,16 @@ function renderPerfStudentList() {
     if (!isAuthenticated()) return;
     const students = JSON.parse(localStorage.getItem('students')) || [];
     const validStudents = students.filter(s => s.id !== 'SYS_CONFIG_X99' && s.id !== 'SYS_WIPE_ALL');
+    const logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
     const listEl = document.getElementById('perf-students-list');
     const query = (document.getElementById('search-perf-student')?.value || '').toLowerCase();
 
     if (!listEl) return;
     listEl.innerHTML = '';
+
+    const globalDeletedDates = logs.filter(l => l.id === 'SYS_DELETED_DATE').map(l => l.date);
+    const validLogs = logs.filter(l => !globalDeletedDates.includes(l.date) && l.id !== 'SYS_WIPE_LOGS' && l.id !== 'SYS_WIPE_ALL');
+    let uniqueDates = [...new Set(validLogs.map(l => l.date))];
 
     let filtered = validStudents;
     if (query) {
@@ -4717,19 +4714,66 @@ function renderPerfStudentList() {
     }
 
     filtered.forEach(s => {
+        const sLogs = validLogs.filter(l => String(l.id) === String(s.id));
+        let onIn=0, lateIn=0, onOut=0, lateOut=0, bonus=0, absents=0;
+
+        sLogs.forEach(log => {
+            if (log.action === 'Time In') onIn++;
+            if (log.action === 'Time In (Late)') lateIn++;
+            if (log.action === 'Time Out') onOut++;
+            if (log.action === 'Time Out (Late)') lateOut++;
+            if (log.action.includes('Out') && log.details && log.details.announcement === 'Yes') bonus += 1.5;
+        });
+
+        uniqueDates.forEach(dateStr => {
+            const d = new Date(dateStr);
+            const dayStr = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][d.getDay()];
+            if (s.assignedDays && s.assignedDays.includes(dayStr)) {
+                const hasIn = sLogs.some(l => l.date === dateStr && (l.action.includes('Time In') || l.action.includes('Exempted')));
+                if (!hasIn) absents++;
+            }
+        });
+
+        const totalActions = onIn + lateIn + onOut + lateOut;
+        let perfRate = 0;
+        if (totalActions === 0 && absents === 0) perfRate = 100; // Perfect clean slate
+        else if (totalActions > 0) perfRate = ((onIn + onOut) / totalActions) * 100;
+        else perfRate = 0;
+
+        perfRate = Math.min(perfRate + bonus, 100);
+        const finalRate = Math.round(perfRate);
+
+        let bgColor = '';
+        let borderColor = '';
+        if (finalRate >= 80) {
+            bgColor = 'rgba(34, 197, 94, 0.1)'; 
+            borderColor = 'var(--success, #22c55e)';
+        } else if (finalRate >= 50) {
+            bgColor = 'rgba(245, 158, 11, 0.1)'; 
+            borderColor = '#f59e0b';
+        } else {
+            bgColor = 'rgba(239, 68, 68, 0.1)'; 
+            borderColor = 'var(--error, #ef4444)';
+        }
+
         const isSelected = selectedPerfStudentId === s.id;
+        if (isSelected) bgColor = bgColor.replace('0.1)', '0.3)'); 
+
         const li = document.createElement('li');
-        li.style.cssText = `padding: 12px 15px; border-bottom: 1px solid #2d313c; cursor: pointer; transition: 0.2s; display: flex; flex-direction: column; gap: 4px; background: ${isSelected ? 'rgba(var(--accent-rgb), 0.1)' : 'transparent'}; border-left: ${isSelected ? '4px solid var(--accent)' : '4px solid transparent'};`;
+        li.style.cssText = `padding: 12px 15px; margin-bottom: 6px; border-radius: 6px; cursor: pointer; transition: 0.2s; display: flex; justify-content: space-between; align-items: center; background: ${bgColor}; border-left: 4px solid ${borderColor};`;
         
         li.onclick = () => {
             selectedPerfStudentId = s.id;
-            renderPerfStudentList(); // Re-render to highlight selected
-            renderPerfStudentDetails(); // Generate Report
+            renderPerfStudentList(); 
+            renderPerfStudentDetails(); 
         };
         
         li.innerHTML = `
-            <span style="font-weight: bold; color: var(--text-main); font-size: 14px;">${s.name || 'Unknown'}</span>
-            <span style="font-size: 11px; color: var(--text-muted);">ID: ${s.id}</span>
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+                <span style="font-weight: bold; color: var(--text-main); font-size: 13px;">${s.name || 'Unknown'}</span>
+                <span style="font-size: 11px; color: var(--text-muted); opacity: 0.8;">ID: ${s.id}</span>
+            </div>
+            <span style="font-weight: bold; font-size: 15px; color: ${borderColor};">${finalRate}%</span>
         `;
         listEl.appendChild(li);
     });
