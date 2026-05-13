@@ -1980,6 +1980,8 @@ function switchAdminSection(sectionId, element) {
         renderSchedule();
     } else if (sectionId === 'sec-history') {
         renderHistoryView();
+    } else if (sectionId === 'sec-performance') {     
+        renderPerfStudentList();
     } else if (sectionId === 'sec-settings') {
         fetchAdminAccounts();
         applySystemConfig();
@@ -4688,4 +4690,171 @@ function checkServerStatus() {
 
     pingBackend(); // Ping immediately
     serverStatusCheckTimer = setInterval(pingBackend, 5000); // Ping every 5 seconds until awake
+}
+
+let selectedPerfStudentId = null;
+
+function renderPerfStudentList() {
+    if (!isAuthenticated()) return;
+    const students = JSON.parse(localStorage.getItem('students')) || [];
+    const validStudents = students.filter(s => s.id !== 'SYS_CONFIG_X99' && s.id !== 'SYS_WIPE_ALL');
+    const listEl = document.getElementById('perf-students-list');
+    const query = (document.getElementById('search-perf-student')?.value || '').toLowerCase();
+
+    if (!listEl) return;
+    listEl.innerHTML = '';
+
+    let filtered = validStudents;
+    if (query) {
+        filtered = validStudents.filter(s => (s.name || '').toLowerCase().includes(query) || String(s.id).toLowerCase().includes(query));
+    }
+
+    filtered.sort((a,b) => (a.name||'').localeCompare(b.name||''));
+
+    if (filtered.length === 0) {
+        listEl.innerHTML = `<li style="padding: 15px; text-align: center; color: var(--text-muted); font-style: italic; font-size: 12px;">No students found.</li>`;
+        return;
+    }
+
+    filtered.forEach(s => {
+        const isSelected = selectedPerfStudentId === s.id;
+        const li = document.createElement('li');
+        li.style.cssText = `padding: 12px 15px; border-bottom: 1px solid #2d313c; cursor: pointer; transition: 0.2s; display: flex; flex-direction: column; gap: 4px; background: ${isSelected ? 'rgba(var(--accent-rgb), 0.1)' : 'transparent'}; border-left: ${isSelected ? '4px solid var(--accent)' : '4px solid transparent'};`;
+        
+        li.onclick = () => {
+            selectedPerfStudentId = s.id;
+            renderPerfStudentList(); // Re-render to highlight selected
+            renderPerfStudentDetails(); // Generate Report
+        };
+        
+        li.innerHTML = `
+            <span style="font-weight: bold; color: var(--text-main); font-size: 14px;">${s.name || 'Unknown'}</span>
+            <span style="font-size: 11px; color: var(--text-muted);">ID: ${s.id}</span>
+        `;
+        listEl.appendChild(li);
+    });
+}
+
+function renderPerfStudentDetails() {
+    const contentEl = document.getElementById('perf-detail-content');
+    if (!contentEl) return;
+    
+    if (!selectedPerfStudentId) {
+        contentEl.innerHTML = `<p class="placeholder-text" style="text-align: center; margin-top: 80px; font-size: 1.1rem;">👈 Select a student from the list to generate their report.</p>`;
+        return;
+    }
+
+    const students = JSON.parse(localStorage.getItem('students')) || [];
+    const logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
+    const student = students.find(s => s.id === selectedPerfStudentId);
+
+    if (!student) return;
+
+    // 1. Get Operational Dates
+    const globalDeletedDates = logs.filter(l => l.id === 'SYS_DELETED_DATE').map(l => l.date);
+    const validLogs = logs.filter(l => !globalDeletedDates.includes(l.date) && l.id !== 'SYS_WIPE_LOGS' && l.id !== 'SYS_WIPE_ALL');
+    let uniqueDates = [...new Set(validLogs.map(l => l.date))];
+    uniqueDates.sort((a, b) => new Date(a) - new Date(b));
+
+    // 2. Filter Logs for this student
+    const sLogs = validLogs.filter(l => String(l.id) === String(student.id));
+
+    let onTimeIn = 0; let lateIn = 0;
+    let onTimeOut = 0; let lateOut = 0;
+    let bonus = 0;
+
+    sLogs.forEach(log => {
+        if (log.action === 'Time In') onTimeIn++;
+        if (log.action === 'Time In (Late)') lateIn++;
+        if (log.action === 'Time Out') onTimeOut++;
+        if (log.action === 'Time Out (Late)') lateOut++;
+        if (log.action.includes('Out') && log.details && log.details.announcement === 'Yes') bonus += 1.5;
+    });
+
+    // 3. Calculate Absents based on Schedule
+    let absents = 0;
+    let absentDates = [];
+
+    uniqueDates.forEach(dateStr => {
+        const d = new Date(dateStr);
+        const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        const dayStr = dayNames[d.getDay()];
+
+        // If they were scheduled for this day
+        if (student.assignedDays && student.assignedDays.includes(dayStr)) {
+            // Check if they came in
+            const hasIn = sLogs.some(l => l.date === dateStr && (l.action.includes('Time In') || l.action.includes('Exempted')));
+            if (!hasIn) {
+                absents++;
+                absentDates.push(dateStr);
+            }
+        }
+    });
+
+    // 4. Calculate Rate
+    const totalActions = onTimeIn + lateIn + onTimeOut + lateOut;
+    let perfRate = totalActions > 0 ? (onTimeIn + onTimeOut) / totalActions * 100 : 0;
+    perfRate = Math.min(perfRate + bonus, 100);
+    const perfRateStr = Math.round(perfRate) + '%';
+    const rateColor = perfRate >= 80 ? 'var(--success)' : (perfRate >= 50 ? '#f59e0b' : 'var(--error)');
+
+    // 5. Build Dates HTML
+    let absentHtml = '';
+    if (absentDates.length === 0) {
+        absentHtml = '<span style="color: var(--success); font-style: italic; font-size: 13px; font-weight: bold;">🎉 Zero absences recorded!</span>';
+    } else {
+        absentHtml = `<div style="display: flex; flex-wrap: wrap; gap: 8px;">`;
+        absentDates.forEach(ad => {
+            absentHtml += `<span style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); color: var(--error); padding: 5px 10px; border-radius: 4px; font-size: 12px; font-weight: bold;">${ad}</span>`;
+        });
+        absentHtml += `</div>`;
+    }
+
+    // 6. Draw Dashboard
+    contentEl.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 15px;">
+            <div>
+                <h2 style="margin: 0; color: var(--text-main); font-size: 1.8rem;">${student.name}</h2>
+                <div style="margin-top: 5px; display: flex; gap: 10px; flex-wrap: wrap;">
+                    <span style="color: var(--text-muted); font-size: 12px; background: rgba(255,255,255,0.05); padding: 3px 8px; border-radius: 4px;">ID: <strong>${student.id}</strong></span>
+                    <span style="color: var(--text-muted); font-size: 12px; background: rgba(255,255,255,0.05); padding: 3px 8px; border-radius: 4px;">Class: <strong>${student.classLevel || 'Freshmen'}</strong></span>
+                    <span style="color: var(--text-muted); font-size: 12px; background: rgba(255,255,255,0.05); padding: 3px 8px; border-radius: 4px;">GC: <strong>${student.gcHandle || 'None'}</strong></span>
+                </div>
+            </div>
+            <div style="text-align: right; background: rgba(0,0,0,0.2); padding: 10px 20px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.05);">
+                <span style="display: block; font-size: 10px; color: var(--text-muted); text-transform: uppercase; font-weight: bold; margin-bottom: 2px;">Overall Rate</span>
+                <span style="font-size: 2.2rem; font-weight: bold; color: ${rateColor}; line-height: 1;">${perfRateStr}</span>
+            </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-top: 10px;">
+            <div style="background: rgba(34, 197, 94, 0.05); border: 1px solid rgba(34, 197, 94, 0.2); padding: 15px; border-radius: 8px; text-align: center;">
+                <span style="display: block; font-size: 11px; color: var(--success); text-transform: uppercase; margin-bottom: 8px; font-weight: bold;">On-Time (In)</span>
+                <span style="font-size: 1.8rem; font-weight: bold; color: var(--success);">${onTimeIn}</span>
+            </div>
+            <div style="background: rgba(245, 158, 11, 0.05); border: 1px solid rgba(245, 158, 11, 0.2); padding: 15px; border-radius: 8px; text-align: center;">
+                <span style="display: block; font-size: 11px; color: #f59e0b; text-transform: uppercase; margin-bottom: 8px; font-weight: bold;">Late (In)</span>
+                <span style="font-size: 1.8rem; font-weight: bold; color: #f59e0b;">${lateIn}</span>
+            </div>
+            <div style="background: rgba(34, 197, 94, 0.05); border: 1px solid rgba(34, 197, 94, 0.2); padding: 15px; border-radius: 8px; text-align: center;">
+                <span style="display: block; font-size: 11px; color: var(--success); text-transform: uppercase; margin-bottom: 8px; font-weight: bold;">On-Time (Out)</span>
+                <span style="font-size: 1.8rem; font-weight: bold; color: var(--success);">${onTimeOut}</span>
+            </div>
+            <div style="background: rgba(245, 158, 11, 0.05); border: 1px solid rgba(245, 158, 11, 0.2); padding: 15px; border-radius: 8px; text-align: center;">
+                <span style="display: block; font-size: 11px; color: #f59e0b; text-transform: uppercase; margin-bottom: 8px; font-weight: bold;">Late (Out)</span>
+                <span style="font-size: 1.8rem; font-weight: bold; color: #f59e0b;">${lateOut}</span>
+            </div>
+            <div style="background: rgba(239, 68, 68, 0.05); border: 1px solid rgba(239, 68, 68, 0.2); padding: 15px; border-radius: 8px; text-align: center;">
+                <span style="display: block; font-size: 11px; color: var(--error); text-transform: uppercase; margin-bottom: 8px; font-weight: bold;">Total Absents</span>
+                <span style="font-size: 1.8rem; font-weight: bold; color: var(--error);">${absents}</span>
+            </div>
+        </div>
+
+        <div style="margin-top: 15px; background: #16181d; padding: 20px; border-radius: 8px; border: 1px solid #2d313c;">
+            <h4 style="color: var(--text-main); margin: 0 0 15px 0; font-size: 14px; display: flex; align-items: center; gap: 8px;">
+                📅 Dates Marked Absent
+            </h4>
+            ${absentHtml}
+        </div>
+    `;
 }
