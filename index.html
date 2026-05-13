@@ -489,6 +489,20 @@
 
                     <div class="panel" style="flex: 1.2; display: flex; flex-direction: column; overflow: hidden;">
                         <h3>Students Data</h3>
+
+                        <div style="display: flex; gap: 10px; margin-bottom: 15px; width: 100%; flex-wrap: wrap; flex-shrink: 0; align-items: center;">
+                            <input type="text" id="search-student" placeholder="🔍 Search Name or ID..." oninput="renderStudents()" style="margin: 0; flex: 1; padding: 8px; border-radius: 4px; border: 1px solid #333a45; background: #121419; color: white; outline: none;">
+                            
+                            <select id="filter-sort-students" onchange="renderStudents()" style="padding: 8px; border-radius: 4px; border: 1px solid #333a45; background: #121419; color: var(--accent); cursor: pointer; outline: none; font-weight: bold; flex-shrink: 0;">
+                                <option value="ALL">All Students</option>
+                                <option value="AZ">Alphabetical A-Z</option>
+                                <option value="ZA">Alphabetical Z-A</option>
+                                <option value="OLDEST">Created First</option>
+                                <option value="NEWEST">Created Last</option>
+                                <option value="UPPER">UpperClassmen</option>
+                                <option value="FRESH">Freshmen</option>
+                            </select>
+                        </div>
                         
                         <div style="display: flex; gap: 10px; margin-bottom: 15px; width: 100%; flex-wrap: wrap; flex-shrink: 0; align-items: center;">
                             <input type="text" id="search-student" placeholder="🔍 Search Name or ID..." onkeyup="searchStudents()" style="margin: 0; flex: 1;">
