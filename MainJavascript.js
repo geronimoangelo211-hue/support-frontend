@@ -1574,11 +1574,11 @@ async function handleTimeIn() {
             if (typeof renderAttendanceSummary === 'function') renderAttendanceSummary();
         } catch(e) {}
 
-        stopAnim(); // 🟢 Final Unlock after success!
+        stopAnim(); 
 
     } catch (error) {
         console.error(error);
-        stopAnim(); // 🟢 Failsafe Unlock
+        stopAnim(); 
     }
 }
 
@@ -1992,14 +1992,18 @@ function switchAttendanceTab(tab) {
     document.querySelectorAll('.sr-tab-btn').forEach(btn => btn.classList.remove('active'));
     document.getElementById('tab-btn-' + tab).classList.add('active');
     
+    const sortDropdown = document.getElementById('sort-attendance-global');
+
     if (tab === 'summary') {
         document.getElementById('att-pane-summary').style.display = 'flex';
         document.getElementById('att-pane-logs').style.display = 'none';
-        renderAttendanceSummary(); // Instant render
+        if (sortDropdown) sortDropdown.style.display = 'block'; 
+        renderAttendanceSummary();
     } else {
         document.getElementById('att-pane-summary').style.display = 'none';
         document.getElementById('att-pane-logs').style.display = 'flex';
-        renderLogs(); // Instant render
+        if (sortDropdown) sortDropdown.style.display = 'none'; 
+        renderLogs();
     }
 }
 
@@ -2020,10 +2024,7 @@ function renderLogs() {
     const tbody = document.getElementById('attendance-logs-body');
     
     const searchInput = document.getElementById('search-attendance-global');
-    const sortSelect = document.getElementById('sort-attendance-global');
-    
     const query = searchInput ? searchInput.value.toLowerCase() : '';
-    const sortVal = sortSelect ? sortSelect.value : 'NAME_ASC';
 
     if (!tbody) return;
     tbody.innerHTML = '';
@@ -2046,37 +2047,17 @@ function renderLogs() {
     });
 
     filteredLogs.sort((a, b) => {
-        const stuA = validStudents.find(s => String(s.id) === String(a.id)) || {};
-        const stuB = validStudents.find(s => String(s.id) === String(b.id)) || {};
-        
-        const nameA = (a.name || '').toLowerCase().trim();
-        const nameB = (b.name || '').toLowerCase().trim();
-        const idA = (a.id || '').toString().trim();
-        const idB = (b.id || '').toString().trim();
-        const classA = (stuA.classLevel || 'zzzz').toLowerCase().trim();
-        const classB = (stuB.classLevel || 'zzzz').toLowerCase().trim();
-
-        if (sortVal === 'NAME_ASC') return nameA < nameB ? -1 : (nameA > nameB ? 1 : 0);
-        if (sortVal === 'NAME_DESC') return nameA > nameB ? -1 : (nameA < nameB ? 1 : 0);
-        if (sortVal === 'ID_ASC') return idA.localeCompare(idB, undefined, {numeric: true});
-        if (sortVal === 'CLASS_FRESH') {
-            if (classA === 'freshmen' && classB !== 'freshmen') return -1;
-            if (classA !== 'freshmen' && classB === 'freshmen') return 1;
-            return nameA < nameB ? -1 : (nameA > nameB ? 1 : 0);
-        }
-        if (sortVal === 'CLASS_UPPER') {
-            if (classA === 'upperclassmen' && classB !== 'upperclassmen') return -1;
-            if (classA !== 'upperclassmen' && classB === 'upperclassmen') return 1;
-            return nameA < nameB ? -1 : (nameA > nameB ? 1 : 0);
-        }
-        return b.originalIndex - a.originalIndex; 
+        return a.originalIndex - b.originalIndex; 
     });
 
+    if (filteredLogs.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color: var(--text-muted); padding: 20px; font-style: italic;">No logs found.</td></tr>`;
+        updateLiveAttendanceCounters();
+        return;
+    }
+
     filteredLogs.forEach(log => {
-        
-        // 🟢 THIS WAS THE MISSING LINE THAT CRASHED THE TABLE 🟢
         const safeId = String(log.id).replace(/'/g, "\\'");
-        
         const tr = document.createElement('tr');
         
         let statusColor = 'var(--text-main)';
@@ -2105,6 +2086,8 @@ function renderLogs() {
         `;
         tbody.appendChild(tr);
     });
+    
+    updateLiveAttendanceCounters(); 
     applyVisitorMode();
 }
 
@@ -3996,21 +3979,53 @@ function renderAttendanceSummary() {
     const tbody = document.getElementById('summary-body');
     if (!tbody) return;
 
+    const searchInput = document.getElementById('search-attendance-global');
+    const query = searchInput ? searchInput.value.toLowerCase() : '';
+    const sortSelect = document.getElementById('sort-attendance-global');
+    const sortVal = sortSelect ? sortSelect.value : 'NAME_ASC';
+
     const shift = getShiftDateDetails();
     const targetDayStr = shift.dayStr;
     const todayStr = shift.dateStr;
 
-    const scheduledStudents = validStudents.filter(s => s.assignedDays && s.assignedDays.includes(targetDayStr));
+    let scheduledStudents = validStudents.filter(s => s.assignedDays && s.assignedDays.includes(targetDayStr));
     const todayLogs = logs.filter(l => l.date === todayStr);
+
+    if (query) {
+        scheduledStudents = scheduledStudents.filter(s => (s.name || '').toLowerCase().includes(query) || String(s.id).toLowerCase().includes(query));
+    }
+
+    scheduledStudents.sort((a, b) => {
+        const nameA = (a.name || '').toLowerCase().trim();
+        const nameB = (b.name || '').toLowerCase().trim();
+        const idA = (a.id || '').toString().trim();
+        const idB = (b.id || '').toString().trim();
+        const classA = (a.classLevel || 'zzzz').toLowerCase().trim();
+        const classB = (b.classLevel || 'zzzz').toLowerCase().trim();
+
+        if (sortVal === 'NAME_ASC') return nameA < nameB ? -1 : (nameA > nameB ? 1 : 0);
+        if (sortVal === 'NAME_DESC') return nameA > nameB ? -1 : (nameA < nameB ? 1 : 0);
+        if (sortVal === 'ID_ASC') return idA.localeCompare(idB, undefined, {numeric: true});
+        if (sortVal === 'CLASS_FRESH') {
+            if (classA === 'freshmen' && classB !== 'freshmen') return -1;
+            if (classA !== 'freshmen' && classB === 'freshmen') return 1;
+            return nameA < nameB ? -1 : (nameA > nameB ? 1 : 0);
+        }
+        if (sortVal === 'CLASS_UPPER') {
+            if (classA === 'upperclassmen' && classB !== 'upperclassmen') return -1;
+            if (classA !== 'upperclassmen' && classB === 'upperclassmen') return 1;
+            return nameA < nameB ? -1 : (nameA > nameB ? 1 : 0);
+        }
+        return 0;
+    });
 
     tbody.innerHTML = '';
     
     if (scheduledStudents.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; color: var(--text-muted); padding: 20px;">No students scheduled for duty today (${targetDayStr}).</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; color: var(--text-muted); padding: 20px; font-style: italic;">No students match this filter.</td></tr>`;
+        updateLiveAttendanceCounters();
         return;
     }
-
-    scheduledStudents.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 
     scheduledStudents.forEach(student => {
         const sLogs = todayLogs.filter(l => String(l.id) === String(student.id));
@@ -4051,6 +4066,8 @@ function renderAttendanceSummary() {
         `;
         tbody.appendChild(tr);
     });
+
+    updateLiveAttendanceCounters(); 
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -5058,3 +5075,36 @@ document.addEventListener('DOMContentLoaded', () => {
         setTimeout(updateActiveAdminsTracker, 1000);
     }
 });
+
+function updateLiveAttendanceCounters() {
+    const students = JSON.parse(localStorage.getItem('students')) || [];
+    const logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
+    const shift = getShiftDateDetails();
+    
+    const targetDayStr = shift.dayStr;
+    const todayStr = shift.dateStr;
+
+    const scheduledStudents = students.filter(s => s.id !== 'SYS_CONFIG_X99' && s.id !== 'SYS_WIPE_ALL' && s.assignedDays && s.assignedDays.includes(targetDayStr));
+    const todayLogs = logs.filter(l => l.date === todayStr);
+
+    let completedTotal = 0;
+    let completedUpper = 0;
+    let completedFresh = 0;
+
+    scheduledStudents.forEach(s => {
+        const sLogs = todayLogs.filter(l => String(l.id) === String(s.id));
+        const hasIn = sLogs.some(l => l.action.includes('Time In') || l.action.includes('Exempted'));
+        const hasOut = sLogs.some(l => l.action.includes('Time Out') || l.action.includes('Exempted'));
+        
+        if (hasIn && hasOut) {
+            completedTotal++;
+            const lvl = (s.classLevel || 'UpperClassmen').toLowerCase();
+            if (lvl === 'freshmen') completedFresh++;
+            else completedUpper++;
+        }
+    });
+
+    if (document.getElementById('live-completed-total')) document.getElementById('live-completed-total').textContent = completedTotal;
+    if (document.getElementById('live-completed-upper')) document.getElementById('live-completed-upper').textContent = completedUpper;
+    if (document.getElementById('live-completed-fresh')) document.getElementById('live-completed-fresh').textContent = completedFresh;
+}
