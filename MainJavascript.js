@@ -4750,11 +4750,13 @@ function renderPerfStudentDetails() {
 
     if (!student) return;
 
+    // 1. Get Operational Dates
     const globalDeletedDates = logs.filter(l => l.id === 'SYS_DELETED_DATE').map(l => l.date);
     const validLogs = logs.filter(l => !globalDeletedDates.includes(l.date) && l.id !== 'SYS_WIPE_LOGS' && l.id !== 'SYS_WIPE_ALL');
     let uniqueDates = [...new Set(validLogs.map(l => l.date))];
     uniqueDates.sort((a, b) => new Date(a) - new Date(b));
 
+    // 2. Filter Logs for this student
     const sLogs = validLogs.filter(l => String(l.id) === String(student.id));
 
     let onTimeIn = 0; let lateIn = 0;
@@ -4769,24 +4771,20 @@ function renderPerfStudentDetails() {
         if (log.action.includes('Out') && log.details && log.details.announcement === 'Yes') bonus += 1.5;
     });
 
+    // 3. Calculate Absents based on Schedule
     let absents = 0;
-    let absentDates = [];
-
     uniqueDates.forEach(dateStr => {
         const d = new Date(dateStr);
         const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
         const dayStr = dayNames[d.getDay()];
 
-        // If they were scheduled for this day
         if (student.assignedDays && student.assignedDays.includes(dayStr)) {
             const hasIn = sLogs.some(l => l.date === dateStr && (l.action.includes('Time In') || l.action.includes('Exempted')));
-            if (!hasIn) {
-                absents++;
-                absentDates.push(dateStr);
-            }
+            if (!hasIn) absents++;
         }
     });
 
+    // 4. CORRECTED RATE MATH
     const totalActions = onTimeIn + lateIn + onTimeOut + lateOut;
     let perfRate = 0;
     
@@ -4801,22 +4799,70 @@ function renderPerfStudentDetails() {
     perfRate = Math.min(perfRate + bonus, 100);
     const finalRoundedRate = Math.round(perfRate);
 
+    // Track starting value for animation
     const startValue = currentPerfRateTracker;
     currentPerfRateTracker = finalRoundedRate; 
-    
     const initialColor = startValue >= 80 ? 'var(--success)' : (startValue >= 50 ? '#f59e0b' : 'var(--error)');
 
-    let absentHtml = '';
-    if (absentDates.length === 0) {
-        absentHtml = '<span style="color: var(--success); font-style: italic; font-size: 13px; font-weight: bold;">🎉 Zero absences recorded!</span>';
-    } else {
-        absentHtml = `<div style="display: flex; flex-wrap: wrap; gap: 8px;">`;
-        absentDates.forEach(ad => {
-            absentHtml += `<span style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); color: var(--error); padding: 5px 10px; border-radius: 4px; font-size: 12px; font-weight: bold;">${ad}</span>`;
-        });
-        absentHtml += `</div>`;
-    }
+    // 🟢 5. NEW DETAILED HISTORY TIMELINE 🟢
+    let historyHtml = '<div style="display: flex; flex-direction: column; gap: 8px; max-height: 220px; overflow-y: auto; padding-right: 5px;">';
+    let displayDates = [...uniqueDates].reverse(); // Show newest dates first
+    let recordsFound = false;
 
+    displayDates.forEach(dateStr => {
+        const d = new Date(dateStr);
+        const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        const dayStr = dayNames[d.getDay()];
+        
+        const dayLogs = sLogs.filter(l => l.date === dateStr);
+        const isScheduled = student.assignedDays && student.assignedDays.includes(dayStr);
+        
+        // Skip days they weren't scheduled for AND didn't log anything
+        if (!isScheduled && dayLogs.length === 0) return; 
+        
+        recordsFound = true;
+        
+        let inText = '<span style="color: var(--error); font-weight: bold;">Absent</span>';
+        let outText = '<span style="color: var(--error); font-weight: bold;">Absent</span>';
+        let rowBg = 'rgba(255,255,255,0.02)';
+        
+        const inLog = dayLogs.find(l => l.action.includes('Time In'));
+        const outLog = dayLogs.find(l => l.action.includes('Time Out'));
+        const exemptLog = dayLogs.find(l => l.action.includes('Exempted'));
+        
+        if (exemptLog) {
+            inText = '<span style="color: #66fcf1; font-weight: bold;">Exempted</span>';
+            outText = '<span style="color: #66fcf1; font-weight: bold;">Exempted</span>';
+        } else {
+            if (inLog) {
+                const color = inLog.action.includes('Late') ? '#f59e0b' : 'var(--success)';
+                const status = inLog.action.includes('Late') ? '<span style="font-size: 10px; opacity: 0.8;">(Late)</span>' : '';
+                inText = `<span style="color: ${color}; font-weight: bold;">${inLog.time} ${status}</span>`;
+            }
+            if (outLog) {
+                const color = outLog.action.includes('Late') ? '#f59e0b' : 'var(--success)';
+                const status = outLog.action.includes('Late') ? '<span style="font-size: 10px; opacity: 0.8;">(Late)</span>' : '';
+                outText = `<span style="color: ${color}; font-weight: bold;">${outLog.time} ${status}</span>`;
+            }
+        }
+
+        historyHtml += `
+            <div style="display: flex; justify-content: space-between; align-items: center; background: ${rowBg}; border: 1px solid #333a45; padding: 10px 15px; border-radius: 6px;">
+                <span style="color: var(--text-main); font-weight: bold; font-size: 13px; width: 90px;">${dateStr}</span>
+                <div style="display: flex; gap: 20px; flex: 1; justify-content: space-around;">
+                    <span style="font-size: 12px; color: var(--text-muted);">In: ${inText}</span>
+                    <span style="font-size: 12px; color: var(--text-muted);">Out: ${outText}</span>
+                </div>
+            </div>
+        `;
+    });
+    
+    if (!recordsFound) {
+        historyHtml += '<span style="color: var(--text-muted); font-style: italic; font-size: 13px;">No history records available yet.</span>';
+    }
+    historyHtml += '</div>';
+
+    // 6. Draw Dashboard
     contentEl.innerHTML = `
         <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 15px;">
             <div>
@@ -4830,8 +4876,6 @@ function renderPerfStudentDetails() {
             
             <div style="text-align: right; background: rgba(0,0,0,0.2); padding: 10px 20px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.05); margin-right: 20px;">
                 <span style="display: block; font-size: 10px; color: var(--text-muted); text-transform: uppercase; font-weight: bold; margin-bottom: 2px;">Overall Rate</span>
-                
-                <!-- Starts at the PREVIOUS value so it can count up/down smoothly -->
                 <span id="perf-anim-target" style="font-size: 2.2rem; font-weight: bold; color: ${initialColor}; line-height: 1;">${startValue}%</span>
             </div>
         </div>
@@ -4861,9 +4905,9 @@ function renderPerfStudentDetails() {
 
         <div style="margin-top: 15px; background: #16181d; padding: 20px; border-radius: 8px; border: 1px solid #2d313c;">
             <h4 style="color: var(--text-main); margin: 0 0 15px 0; font-size: 14px; display: flex; align-items: center; gap: 8px;">
-                📅 Dates Marked Absent
+                📅 Detailed Attendance History
             </h4>
-            ${absentHtml}
+            ${historyHtml}
         </div>
     `;
 
