@@ -1702,44 +1702,74 @@ async function finalizeTimeOut() {
 function enforceHistoryLimit() {}
 
 function renderStudents() {
-    if(!isAuthenticated()) return;
-    const list = document.getElementById('registered-students-list');
-    if (!list) return;
-    
+    if (!isAuthenticated()) return;
     const students = JSON.parse(localStorage.getItem('students')) || [];
+    const tbody = document.getElementById('students-table-body'); 
+    if (!tbody) return;
+
     const searchInput = document.getElementById('search-student');
     const query = searchInput ? searchInput.value.toLowerCase() : '';
     
-    list.innerHTML = '';
+    const filterSelect = document.getElementById('filter-sort-students');
+    const filterVal = filterSelect ? filterSelect.value : 'ALL';
+
+    let validStudents = students
+        .map((s, index) => ({ ...s, originalIndex: index }))
+        .filter(s => s.id !== 'SYS_CONFIG_X99' && s.id !== 'SYS_WIPE_ALL');
+
+    if (query) {
+        validStudents = validStudents.filter(s => 
+            (s.name && s.name.toLowerCase().includes(query)) || 
+            (s.id && String(s.id).toLowerCase().includes(query))
+        );
+    }
+
+    if (filterVal === 'UPPER') {
+        validStudents = validStudents.filter(s => (s.classLevel || 'UpperClassmen').toLowerCase() !== 'freshmen');
+    } else if (filterVal === 'FRESH') {
+        validStudents = validStudents.filter(s => (s.classLevel || 'UpperClassmen').toLowerCase() === 'freshmen');
+    }
+
+    if (filterVal === 'AZ') {
+        validStudents.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    } else if (filterVal === 'ZA') {
+        validStudents.sort((a, b) => (b.name || '').localeCompare(a.name || ''));
+    } else if (filterVal === 'NEWEST') {
+        validStudents.sort((a, b) => b.originalIndex - a.originalIndex); // Largest index first
+    } else if (filterVal === 'OLDEST') {
+        validStudents.sort((a, b) => a.originalIndex - b.originalIndex); // Smallest index first
+    }
+
+    // 5. Render to Table
+    tbody.innerHTML = '';
     
-    let filteredStudents = students.filter(student => 
-        student.id !== 'SYS_WIPE_ALL' && student.id !== 'SYS_CONFIG_X99' &&
-        (((student.name || '').toLowerCase().includes(query)) || 
-        (student.id && String(student.id).toLowerCase().includes(query)))
-    );
+    if (validStudents.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; padding: 20px; color: var(--text-muted); font-style: italic;">No students found matching this filter.</td></tr>`;
+        return;
+    }
 
-    filteredStudents.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-    filteredStudents.forEach(student => {
-        const li = document.createElement('li');
-        const safeId = String(student.id).replace(/'/g, "\\'"); 
-        let gcTag = student.gcHandle ? `<span class="gc-tag">${student.gcHandle}</span>` : '';
-        let classTag = student.classLevel ? `<span class="gc-tag" style="background: rgba(168, 85, 247, 0.2); color: #a855f7; border-color: #a855f7;">${student.classLevel}</span>` : '';
-
-        li.innerHTML = `
-            <div style="display: flex; flex-direction: column;">
-                <div style="display: flex; align-items: center; gap: 5px;"><span style="font-weight: bold; color: var(--text-main);">${student.name || 'Unknown'}</span> ${classTag} ${gcTag}</div>
-                <span style="font-size: 0.8rem; color: var(--text-muted);">ID: ${student.id}</span>
-            </div>
-            <div style="display: flex; gap: 5px;">
-                <button class="edit-btn" onclick="openEditStudentModal('${safeId}')" style="background: rgba(var(--accent-rgb), 0.1); color: var(--accent); padding: 6px 15px; border-radius: 4px; font-size: 11px; border: 1px solid var(--accent); cursor: pointer;">EDIT</button>
-                <button onclick="viewPerformance('${safeId}')" style="background: rgba(var(--accent-rgb), 0.1); color: var(--accent); padding: 6px 15px; border-radius: 4px; font-size: 11px; border: 1px solid var(--accent); cursor: pointer;">VIEW PERF</button>
-                <!-- NEW: Remove Button added to Data tab -->
-                <button class="remove-btn" onclick="deleteStudent('${safeId}')" style="background: rgba(239, 68, 68, 0.1); color: var(--error); padding: 6px 15px; border-radius: 4px; font-size: 11px; border: 1px solid var(--error); cursor: pointer;">REMOVE</button>
-            </div>
+    validStudents.forEach(student => {
+        const safeId = String(student.id).replace(/'/g, "\\'");
+        const lvl = student.classLevel || 'UpperClassmen';
+        const days = student.assignedDays && student.assignedDays.length > 0 ? student.assignedDays.join(', ') : 'None';
+        
+        tbody.innerHTML += `
+            <tr style="border-bottom: 1px solid #2d313c;">
+                <td style="font-weight: bold; color: var(--text-main); padding: 10px;">${student.name || 'Unknown'}</td>
+                <td style="color: var(--text-muted);">${student.id}</td>
+                <td><span style="background: rgba(102, 252, 241, 0.1); color: var(--accent); padding: 3px 6px; border-radius: 4px; font-size: 11px; font-weight: bold;">${lvl}</span></td>
+                <td style="font-size: 11px; color: var(--text-muted);">${days}</td>
+                <td style="text-align: right;">
+                    <div class="button-cell-wrap" style="display: flex; justify-content: flex-end; gap: 10px;">
+                        <button class="admin-edit-icon" onclick="openEditStudentModal('${safeId}')" style="background: transparent; border: none; color: #f59e0b; cursor: pointer; font-weight: bold; font-size: 11px;">EDIT</button>
+                        <button class="remove-btn" onclick="deleteStudent('${safeId}')" style="background: rgba(239, 68, 68, 0.1); border: 1px solid var(--error); color: var(--error); padding: 4px 8px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 11px;">REMOVE</button>
+                    </div>
+                </td>
+            </tr>
         `;
-        list.appendChild(li);
     });
-    applyVisitorMode();
+
+    applyVisitorMode(); 
 }
 
 function searchStudents() {
