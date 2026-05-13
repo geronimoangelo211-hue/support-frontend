@@ -623,7 +623,17 @@
                         <h3 style="margin-top: 0;">Search Student</h3>
                         <p class="placeholder-text" style="margin-top: 0; margin-bottom: 15px;">Find a student to view their metrics.</p>
                         
-                        <input type="text" id="search-perf-student" placeholder="🔍 Search Name or ID..." oninput="renderPerfStudentList()" style="margin-bottom: 15px; padding: 10px; border-radius: 4px; border: 1px solid #333a45; background: #121419; color: white; outline: none; width: 100%; box-sizing: border-box;">
+                        <div style="display: flex; gap: 10px; margin-bottom: 15px; width: 100%; box-sizing: border-box;">
+                            <input type="text" id="search-perf-student" placeholder="🔍 Search Name or ID..." oninput="renderPerfStudentList()" style="flex: 1; padding: 10px; border-radius: 4px; border: 1px solid #333a45; background: #121419; color: white; outline: none; box-sizing: border-box; margin: 0;">
+                            
+                            <select id="filter-perf-student" onchange="renderPerfStudentList()" style="padding: 10px; border-radius: 4px; border: 1px solid #333a45; background: #121419; color: var(--accent); cursor: pointer; outline: none; font-weight: bold; flex-shrink: 0; margin: 0;">
+                                <option value="ALL">All Students</option>
+                                <option value="AZ">Alphabetical A-Z</option>
+                                <option value="ZA">Alphabetical Z-A</option>
+                                <option value="UPPER">UpperClassmen</option>
+                                <option value="FRESH">Freshmen</option>
+                            </select>
+                        </div>
                         
                         <div class="list-container" style="flex: 1; overflow-y: auto; margin-top: 0; border: 1px solid #2d313c; border-radius: 6px;">
                             <ul id="perf-students-list" style="list-style: none; padding: 0; margin: 0;"></ul>
