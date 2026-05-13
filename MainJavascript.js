@@ -2009,8 +2009,9 @@ function switchAttendanceTab(tab) {
 
 function handleGlobalSearch() {
     const attPane = document.getElementById('att-pane-summary');
+    
     if (attPane && attPane.style.display !== 'none') {
-        renderDashboardSummary();
+        renderAttendanceSummary(); 
     } else {
         renderLogs();
     }
@@ -2047,7 +2048,7 @@ function renderLogs() {
     });
 
     filteredLogs.sort((a, b) => {
-        return a.originalIndex - b.originalIndex; 
+        return b.originalIndex - a.originalIndex; 
     });
 
     if (filteredLogs.length === 0) {
