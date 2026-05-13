@@ -4750,13 +4750,11 @@ function renderPerfStudentDetails() {
 
     if (!student) return;
 
-    // 1. Get Operational Dates
     const globalDeletedDates = logs.filter(l => l.id === 'SYS_DELETED_DATE').map(l => l.date);
     const validLogs = logs.filter(l => !globalDeletedDates.includes(l.date) && l.id !== 'SYS_WIPE_LOGS' && l.id !== 'SYS_WIPE_ALL');
     let uniqueDates = [...new Set(validLogs.map(l => l.date))];
     uniqueDates.sort((a, b) => new Date(a) - new Date(b));
 
-    // 2. Filter Logs for this student
     const sLogs = validLogs.filter(l => String(l.id) === String(student.id));
 
     let onTimeIn = 0; let lateIn = 0;
@@ -4771,7 +4769,6 @@ function renderPerfStudentDetails() {
         if (log.action.includes('Out') && log.details && log.details.announcement === 'Yes') bonus += 1.5;
     });
 
-    // 3. Calculate Absents based on Schedule
     let absents = 0;
     let absentDates = [];
 
@@ -4780,7 +4777,6 @@ function renderPerfStudentDetails() {
         const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
         const dayStr = dayNames[d.getDay()];
 
-        // If they were scheduled for this day
         if (student.assignedDays && student.assignedDays.includes(dayStr)) {
             // Check if they came in
             const hasIn = sLogs.some(l => l.date === dateStr && (l.action.includes('Time In') || l.action.includes('Exempted')));
@@ -4791,14 +4787,12 @@ function renderPerfStudentDetails() {
         }
     });
 
-    // 4. Calculate Rate
     const totalActions = onTimeIn + lateIn + onTimeOut + lateOut;
     let perfRate = totalActions > 0 ? (onTimeIn + onTimeOut) / totalActions * 100 : 0;
     perfRate = Math.min(perfRate + bonus, 100);
-    const perfRateStr = Math.round(perfRate) + '%';
+    const finalRoundedRate = Math.round(perfRate);
     const rateColor = perfRate >= 80 ? 'var(--success)' : (perfRate >= 50 ? '#f59e0b' : 'var(--error)');
 
-    // 5. Build Dates HTML
     let absentHtml = '';
     if (absentDates.length === 0) {
         absentHtml = '<span style="color: var(--success); font-style: italic; font-size: 13px; font-weight: bold;">🎉 Zero absences recorded!</span>';
@@ -4810,7 +4804,6 @@ function renderPerfStudentDetails() {
         absentHtml += `</div>`;
     }
 
-    // 6. Draw Dashboard
     contentEl.innerHTML = `
         <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 15px;">
             <div>
@@ -4821,9 +4814,13 @@ function renderPerfStudentDetails() {
                     <span style="color: var(--text-muted); font-size: 12px; background: rgba(255,255,255,0.05); padding: 3px 8px; border-radius: 4px;">GC: <strong>${student.gcHandle || 'None'}</strong></span>
                 </div>
             </div>
-            <div style="text-align: right; background: rgba(0,0,0,0.2); padding: 10px 20px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.05);">
+            
+            <!-- 🟢 ADDED margin-right: 20px FOR THE GAP 🟢 -->
+            <div style="text-align: right; background: rgba(0,0,0,0.2); padding: 10px 20px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.05); margin-right: 20px;">
                 <span style="display: block; font-size: 10px; color: var(--text-muted); text-transform: uppercase; font-weight: bold; margin-bottom: 2px;">Overall Rate</span>
-                <span style="font-size: 2.2rem; font-weight: bold; color: ${rateColor}; line-height: 1;">${perfRateStr}</span>
+                
+                <!-- 🟢 ADDED id="perf-anim-target" and set initial to 0% 🟢 -->
+                <span id="perf-anim-target" style="font-size: 2.2rem; font-weight: bold; color: ${rateColor}; line-height: 1;">0%</span>
             </div>
         </div>
 
@@ -4857,4 +4854,6 @@ function renderPerfStudentDetails() {
             ${absentHtml}
         </div>
     `;
+
+    animateCounting("perf-anim-target", finalRoundedRate, 1200); 
 }
