@@ -1,9 +1,9 @@
 console.log("%cSTOP!", "color: red; font-size: 50px; font-weight: bold; font-family: sans-serif; text-shadow: 2px 2px 0 #000;");
 console.log("%cBawal ka dito panget", "color: white; background: red; font-size: 16px; padding: 5px 10px; border-radius: 5px;");
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
-const GOOGLE_SCRIPT_URL = import.meta.env.VITE_GOOGLE_SCRIPT_URL;
-const ADMIN_SECRET_KEY = import.meta.env.VITE_ADMIN_SECRET_KEY;
+const API_BASE_URL = "https://support-backend-ldos.onrender.com/api";
+const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycby5NWblcfFNB3_IaTWwV5JtNC6_bF_yKTJynQg0DaB1R6aqv97ps8PjZT63Z32bvjA/exec";
+const ADMIN_SECRET_KEY = "SupportAdmin@2026"; 
 
 let globalTimeOffset = 0;
 let globalDayOverride = "";
