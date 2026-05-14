@@ -3810,9 +3810,14 @@ async function sendHeartbeat() {
     try {
         const tk = sessionStorage.getItem('_auth_tkn_x92');
         const parsed = JSON.parse(atob(tk));
-        if (parsed && parsed.username) {
+        const sessionToken = sessionStorage.getItem('adminSessionToken'); // 🟢 Grab the VIP Pass
+
+        if (parsed && parsed.username && sessionToken) {
             await fetch(`${API_BASE_URL}/heartbeat/${parsed.username}`, {
-                method: 'POST'
+                method: 'POST',
+                headers: {
+                    'X-Admin-Key': sessionToken 
+                }
             });
         }
     } catch (e) {}
@@ -5047,7 +5052,15 @@ async function updateActiveAdminsTracker() {
     if (!isAuthenticated()) return;
     
     try {
-        const response = await fetch(`${API_BASE_URL}/accounts`, { cache: 'no-store' });
+        const sessionToken = sessionStorage.getItem('adminSessionToken'); // 🟢 Grab the VIP Pass
+
+        const response = await fetch(`${API_BASE_URL}/accounts`, { 
+            cache: 'no-store',
+            headers: {
+                'X-Admin-Key': sessionToken // 🟢 Show the pass to get the list!
+            }
+        });
+        
         if (!response.ok) return;
         
         const data = await response.json();
@@ -5058,7 +5071,7 @@ async function updateActiveAdminsTracker() {
             if (account.lastOnline) {
                 const seconds = Math.floor((now - account.lastOnline) / 1000);
                 if (seconds < 60) { 
-                    activeCount++;
+                    activeCount++; // Counts anyone online in the last 60 seconds ("Just now")
                 }
             }
         });
@@ -5067,8 +5080,8 @@ async function updateActiveAdminsTracker() {
         if (countEl) {
             countEl.textContent = activeCount;
             
-
-            if (activeCount > 1) {
+            // 🟢 Fixed: Now it glows even if you are the only 1 online!
+            if (activeCount >= 1) { 
                 countEl.style.color = '#66fcf1'; 
                 countEl.style.textShadow = '0 0 8px rgba(102, 252, 241, 0.6)';
             } else {
@@ -5120,4 +5133,9 @@ function updateLiveAttendanceCounters() {
     if (document.getElementById('live-completed-total')) document.getElementById('live-completed-total').textContent = completedTotal;
     if (document.getElementById('live-completed-upper')) document.getElementById('live-completed-upper').textContent = completedUpper;
     if (document.getElementById('live-completed-fresh')) document.getElementById('live-completed-fresh').textContent = completedFresh;
+}
+
+function viewTodayShiftDetails(studentId) {
+    const shift = getShiftDateDetails();
+    openDetailsModal(studentId, shift.dateStr);
 }
