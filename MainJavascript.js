@@ -524,6 +524,9 @@ async function loginAdmin(event) {
             const tokenPayload = btoa(JSON.stringify({ valid: true, timestamp: Date.now(), role: userRole, username: usernameInput }));
             sessionStorage.setItem('_auth_tkn_x92', tokenPayload);
             
+            // 🟢 NEW: Save the VIP Pass from the backend!
+            sessionStorage.setItem('adminSessionToken', data.sessionToken); 
+            
             switchView('admin-dashboard-view');
             
             document.getElementById('admin-user').value = '';
@@ -557,6 +560,7 @@ function logoutAdmin() {
     sessionStorage.removeItem('_auth_tkn_x92');
     sessionStorage.removeItem('currentAdminSec');
     sessionStorage.removeItem('adminLoggedIn'); 
+    sessionStorage.removeItem('adminSessionToken');
     switchView('student-view');
 }
 
@@ -642,8 +646,18 @@ async function fetchAdminAccounts() {
     if (!list) return;
     list.innerHTML = '<li style="padding: 10px; text-align: center;">Loading accounts...</li>';
 
+    const token = sessionStorage.getItem('adminSessionToken');
+
     try {
-        const response = await fetch(`${API_BASE_URL}/accounts`, { cache: 'no-store' });
+        const response = await fetch(`${API_BASE_URL}/accounts`, { 
+            cache: 'no-store',
+            headers: {
+                'X-Admin-Key': token 
+            }
+        });
+        
+        if (!response.ok) throw new Error("Unauthorized");
+        
         const data = await response.json();
         list.innerHTML = '';
         data.forEach(account => {
@@ -658,7 +672,6 @@ async function fetchAdminAccounts() {
             li.style.justifyContent = 'space-between';
             li.style.alignItems = 'center';
             
-            // Protect ONLY the DEVELOPER account from showing the delete button
             let delBtn = (user !== 'DEVELOPER') 
                 ? `<button onclick="deleteAdminAccount('${user}')" class="remove-btn" style="background: transparent; color: var(--error); border: 1px solid var(--error); padding: 4px 8px; font-size: 10px; cursor: pointer;">DELETE</button>` 
                 : `<span style="font-size: 10px; color: var(--text-muted);">DEFAULT</span>`;
