@@ -484,65 +484,80 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 });
 
-async function loginAdmin() {
-    // Assuming these are your input fields
-    const usernameInput = document.getElementById('username-input').value;
-    const passwordInput = document.getElementById('password-input').value;
+async function loginAdmin(event) {
+    if (event) event.preventDefault();
+    const usernameInput = document.getElementById('admin-user').value;
+    const passwordInput = document.getElementById('admin-pass').value;
+    const captchaInput = document.getElementById('admin-captcha-input').value;
+    const errorMsg = document.getElementById('login-message');
+    
+    const loginBtn = document.querySelector('#admin-login-view .btn-primary');
 
-    const response = await fetch(`${API_BASE_URL}/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-            username: usernameInput, 
-            password: passwordInput 
-        })
-    });
+    if (!captchaInput || captchaInput !== currentAdminCaptchaString) {
+        errorMsg.textContent = "Security check failed. Please enter the correct text.";
+        errorMsg.style.display = 'block';
+        generateAdminCaptcha(); 
+        return;
+    }
 
-    const data = await response.json();
+    loginBtn.textContent = "AUTHENTICATING...";
+    loginBtn.disabled = true;
+    loginBtn.style.opacity = "0.7";
 
-    if (data.success) {
-        // 🟢 NEW: Save the VIP Pass to the browser's temporary memory!
-        sessionStorage.setItem("adminSessionToken", data.sessionToken);
+    try {
+        const response = await fetch(`${API_BASE_URL}/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: usernameInput, password: passwordInput })
+        });
         
-        // Proceed to let them into the dashboard
-        console.log("Login successful! Role:", data.role);
-        // showDashboard() or whatever your transition function is called
-    } else {
-        alert("Login Failed: " + data.message);
-    }
-}
-
-async function loadAdminAccounts() {
-    // 🟢 1. Grab the VIP Pass from memory
-    const token = sessionStorage.getItem("adminSessionToken");
-
-    // 🟢 2. If they don't have a token, they aren't logged in!
-    if (!token) {
-        alert("Session expired. Please log in again.");
-        // Redirect them back to the login screen
-        return; 
-    }
-
-    const response = await fetch(`${API_BASE_URL}/accounts`, {
-        method: 'GET',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-Admin-Key': token  
+        const textResponse = await response.text();
+        let data;
+        try {
+            data = JSON.parse(textResponse);
+        } catch (err) {
+            throw new Error("Server returned an HTML error page.");
         }
-    });
 
-    if (response.ok) {
-        const accountsData = await response.json();
-        console.log("Secure Data Loaded:", accountsData);
-    } else {
-        alert("Access Denied! You are not authorized.");
+        if (data.success) {
+            const userRole = data.role || 'ADMIN'; 
+            const tokenPayload = btoa(JSON.stringify({ valid: true, timestamp: Date.now(), role: userRole, username: usernameInput }));
+            sessionStorage.setItem('_auth_tkn_x92', tokenPayload);
+            
+            switchView('admin-dashboard-view');
+            
+            document.getElementById('admin-user').value = '';
+            document.getElementById('admin-pass').value = '';
+            document.getElementById('admin-captcha-input').value = '';
+            errorMsg.textContent = '';
+            
+            await pullFromCloud();
+            fetchAdminAccounts();
+            renderStudents();
+            renderLogs(); 
+            renderMainDashboard();
+            renderSchedule();
+            renderDutyToday();
+        } else {
+            errorMsg.textContent = data.message || "Invalid credentials.";
+            errorMsg.style.display = 'block';
+            generateAdminCaptcha(); 
+        }
+    } catch (error) {
+        errorMsg.textContent = "Server error. Please try again.";
+        errorMsg.style.display = 'block';
+    } finally {
+        loginBtn.textContent = "Login";
+        loginBtn.disabled = false;
+        loginBtn.style.opacity = "1";
     }
 }
 
 function logoutAdmin() {
-    sessionStorage.removeItem("adminSessionToken"); 
-    
-    window.location.href = "login.html"; 
+    sessionStorage.removeItem('_auth_tkn_x92');
+    sessionStorage.removeItem('currentAdminSec');
+    sessionStorage.removeItem('adminLoggedIn'); 
+    switchView('student-view');
 }
 
 function generateAdminMathCaptcha() {
