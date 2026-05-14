@@ -607,7 +607,7 @@ async function createAdminAccount() {
             method: 'POST',
             headers: { 
                 'Content-Type': 'application/json',
-                'X-Admin-Key': 'SupportAdmin@2026' 
+                'X-Admin-Key': sessionStorage.getItem('adminSessionToken')
             },
             body: JSON.stringify({ username: user, password: pass, role: role })
         });
@@ -3883,12 +3883,11 @@ async function autoRestoreServerData() {
             
             for (const acc of backup) {
                 if (acc.username !== 'DEVELOPER') {
-                    // Inject account back into the Java server
                     await fetch(`${API_BASE_URL}/add-account`, {
                         method: 'POST',
                         headers: { 
                             'Content-Type': 'application/json',
-                            'X-Admin-Key': 'SupportAdmin@2026'
+                            'X-Admin-Key': sessionStorage.getItem('adminSessionToken')
                         },
                         body: JSON.stringify({ username: acc.username, password: acc.password, role: acc.role })
                     });
@@ -5052,12 +5051,12 @@ async function updateActiveAdminsTracker() {
     if (!isAuthenticated()) return;
     
     try {
-        const sessionToken = sessionStorage.getItem('adminSessionToken'); // 🟢 Grab the VIP Pass
+        const sessionToken = sessionStorage.getItem('adminSessionToken'); 
 
         const response = await fetch(`${API_BASE_URL}/accounts`, { 
             cache: 'no-store',
             headers: {
-                'X-Admin-Key': sessionToken // 🟢 Show the pass to get the list!
+                'X-Admin-Key': sessionToken 
             }
         });
         
