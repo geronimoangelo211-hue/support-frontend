@@ -3,7 +3,6 @@ console.log("%cBawal ka dito panget", "color: white; background: red; font-size:
 
 const API_BASE_URL = "https://support-backend-ldos.onrender.com/api";
 const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycby5NWblcfFNB3_IaTWwV5JtNC6_bF_yKTJynQg0DaB1R6aqv97ps8PjZT63Z32bvjA/exec";
-const ADMIN_SECRET_KEY = "SupportAdmin@2026"; 
 
 let globalTimeOffset = 0;
 let globalDayOverride = "";
@@ -256,7 +255,7 @@ async function pushStudentsToCloud() {
     try {
         await fetch(`${API_BASE_URL}/students/sync`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-Admin-Key': ADMIN_SECRET_KEY },
+            headers: { 'Content-Type': 'application/json', 'X-Admin-Key': sessionStorage.getItem('adminSessionToken') },
             body: JSON.stringify(data)
         });
     } catch (err) {}
@@ -718,7 +717,7 @@ async function deleteAdminAccount(user) {
     try {
         const response = await fetch(`${API_BASE_URL}/delete-account/${user}`, {
             method: 'DELETE',
-            headers: { 'X-Admin-Key': 'SupportAdmin@2026' }
+            headers: { 'X-Admin-Key': sessionStorage.getItem('adminSessionToken') }
         });
 
         if (response.ok) {
@@ -741,7 +740,7 @@ async function generateRegistrationLink() {
     try {
         const response = await fetch(`${API_BASE_URL}/register/generate`, { 
             method: 'POST',
-            headers: { 'X-Admin-Key': ADMIN_SECRET_KEY }
+            headers: { 'X-Admin-Key': sessionStorage.getItem('adminSessionToken') }
         });
         const data = await response.json();
         const link = `https://os-register.vercel.app/?token=${data.token}`;
@@ -1411,7 +1410,7 @@ async function devClearLogs() {
         try {
             await fetch(`${API_BASE_URL}/logs/clear`, {
                 method: 'DELETE',
-                headers: { 'X-Admin-Key': ADMIN_SECRET_KEY }
+                headers: { 'X-Admin-Key': sessionStorage.getItem('adminSessionToken') }
             });
         } catch(e) {}
         
@@ -1437,11 +1436,11 @@ async function factoryReset() {
             try {
                 await fetch(`${API_BASE_URL}/students/factory-reset`, {
                     method: 'DELETE',
-                    headers: { 'X-Admin-Key': ADMIN_SECRET_KEY }
+                    headers: { 'X-Admin-Key': sessionStorage.getItem('adminSessionToken') }
                 });
                 await fetch(`${API_BASE_URL}/logs/factory-reset`, {
                     method: 'DELETE',
-                    headers: { 'X-Admin-Key': ADMIN_SECRET_KEY }
+                    headers: { 'X-Admin-Key': sessionStorage.getItem('adminSessionToken') }
                 });
             } catch(e) {}
 
