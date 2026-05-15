@@ -144,6 +144,12 @@
             
             <div class="centered-panel" id="turn-in-form">
                 <h2>Student Online Support</h2>
+                
+                <div style="display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 5px; margin-bottom: 15px;">
+                    <div id="student-server-dot" style="width: 10px; height: 10px; border-radius: 50%; background-color: #f59e0b; animation: pulse-server 1.5s infinite;"></div>
+                    <span id="student-server-text" style="font-size: 12px; color: #f59e0b; font-weight: bold;">Opening Server... Please wait.</span>
+                </div>
+
                 <p>Enter your Student ID to log your attendance.</p>
 
                 <input type="text" id="student-id-input" placeholder="Enter Student ID Number" autocomplete="off">
