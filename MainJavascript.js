@@ -423,6 +423,8 @@ document.addEventListener('DOMContentLoaded', () => {
     
     setTimeout(initSliderCaptcha, 50);
 
+    checkServerStatus();
+
     isIncognito().then(isPrivate => {
         if (isPrivate) {
             const form = document.getElementById('turn-in-form');
@@ -4662,6 +4664,7 @@ function toggleInactivityTracker() {
 
 let serverStatusCheckTimer = null;
 let serverTextCycleTimer = null;
+let isServerKnownAwake = false; // 🟢 NEW: Remembers if the server is already awake
 
 function checkServerStatus() {
     // Admin Elements
@@ -4677,16 +4680,35 @@ function checkServerStatus() {
 
     clearInterval(serverStatusCheckTimer);
     clearInterval(serverTextCycleTimer);
+
+    // 🟢 NEW: Helper function to instantly unlock and set the UI to Ready
+    const setReadyUI = () => {
+        if (adminDot) { adminDot.style.backgroundColor = 'var(--success)'; adminDot.style.animation = 'none'; }
+        if (studentDot) { studentDot.style.backgroundColor = 'var(--success)'; studentDot.style.animation = 'none'; }
+        if (adminText) { adminText.style.color = 'var(--success)'; adminText.textContent = 'Server Online'; }
+        if (studentText) { studentText.style.color = 'var(--success)'; studentText.textContent = 'Ready for Attendance'; }
+        
+        if (loginBtn) { loginBtn.disabled = false; loginBtn.style.opacity = '1'; loginBtn.textContent = 'Login'; }
+        if (btnIn) { btnIn.textContent = 'Time In'; }
+        if (btnOut) { btnOut.textContent = 'Time Out'; }
+        
+        applySystemConfig(); // Lets the normal config decide if buttons should be clickable
+    };
+
+    // 🟢 NEW: If we already woke the server up, skip the animation and instantly unlock!
+    if (isServerKnownAwake) {
+        setReadyUI();
+        return; 
+    }
     
     const bootMessages = [
-        "Server Rebooting...", 
+        "Waking Server...", 
         "Connecting to Database...", 
         "Please wait...", 
-        "Waking up system..."
+        "Almost ready..."
     ];
     let msgIndex = 0;
 
-    // Set UI to "Waking Up" state
     const setWakingUI = () => {
         if (adminDot) { adminDot.style.backgroundColor = '#f59e0b'; adminDot.style.animation = 'pulse-server 1.5s infinite'; }
         if (studentDot) { studentDot.style.backgroundColor = '#f59e0b'; studentDot.style.animation = 'pulse-server 1.5s infinite'; }
@@ -4708,30 +4730,24 @@ function checkServerStatus() {
 
     const pingBackend = async () => {
         try {
-            // 🟢 FIX 1: Hit the public Config endpoint to completely bypass CORS / 401 errors
-            const res = await fetch(`${API_BASE_URL}/config/status`, { cache: 'no-store' });
+            // Adds a quick 4-second timeout so pings don't stack up forever
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 4000);
+
+            const res = await fetch(`${API_BASE_URL}/config/status`, { 
+                cache: 'no-store',
+                signal: controller.signal
+            });
             
+            clearTimeout(timeoutId);
+
             if (res.ok) { 
                 clearInterval(serverTextCycleTimer);
                 clearInterval(serverStatusCheckTimer);
-                
-                // Set UI to "Online" state
-                if (adminDot) { adminDot.style.backgroundColor = 'var(--success)'; adminDot.style.animation = 'none'; }
-                if (studentDot) { studentDot.style.backgroundColor = 'var(--success)'; studentDot.style.animation = 'none'; }
-                if (adminText) { adminText.style.color = 'var(--success)'; adminText.textContent = 'Server Online'; }
-                if (studentText) { studentText.style.color = 'var(--success)'; studentText.textContent = 'Ready for Attendance'; }
-                
-                if (loginBtn) { loginBtn.disabled = false; loginBtn.style.opacity = '1'; loginBtn.textContent = 'Login'; }
-                
-                // 🟢 FIX 2: Restore the actual text on the student buttons!
-                if (btnIn) { btnIn.textContent = 'Time In'; }
-                if (btnOut) { btnOut.textContent = 'Time Out'; }
-                
-                // Let applySystemConfig handle unlocking the student buttons based on real lock status
-                applySystemConfig(); 
+                isServerKnownAwake = true; // 🟢 Cache the awake state!
+                setReadyUI();
             }
         } catch (error) {
-            // Still sleeping or network error, will try again in 5 seconds
             console.log("Server still waking up...");
         }
     };
