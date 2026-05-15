@@ -1051,7 +1051,7 @@ async function toggleAssignedDay(studentId, dayStr, btnElement) {
 async function logAttendanceAction(student, action, endOfShiftDetails = null, overrideDateStr = null) {
     if(isBackendLocked) {
         alert("The system is currently locked. Attendance cannot be recorded.");
-        return;
+        throw new Error("System locked");
     }
 
     const shift = getShiftDateDetails();
@@ -1067,36 +1067,41 @@ async function logAttendanceAction(student, action, endOfShiftDetails = null, ov
     };
 
     let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
-    let wasTombstoned = false;
-    
     if(logs.some(l => l.id === 'SYS_DELETED_DATE' && l.date === dateStr)) {
         logs = logs.filter(l => !(l.id === 'SYS_DELETED_DATE' && l.date === dateStr));
-        wasTombstoned = true;
     }
 
-    logs.push(newLog);
-    localStorage.setItem('attendanceLogs', JSON.stringify(logs));
+    // 🟢 STRICT METHOD: Prepare data but DO NOT save locally yet
+    const tempLogs = [...logs, newLog];
+    const studentsData = localStorage.getItem('students') || "[]";
+    const logsData = JSON.stringify(tempLogs);
+    const configData = localStorage.getItem('sys_config') || '{"locked":false,"regOpen":false}';
 
-    // FIX: Removed the old dead endpoints and connected it to the Cloud Sync Engine
-    try {
-        await pushLogsToCloud();
-    } catch (e) {
-        console.error("Failed to push attendance log to cloud.");
-    }
+    // 🟢 DIRECT BACKEND PUSH
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 sec timeout
+
+    const response = await fetch(`${API_BASE_URL}/sync/push`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            students: studentsData,
+            logs: logsData,
+            config: configData
+        }),
+        signal: controller.signal
+    });
     
-    if (document.getElementById('admin-dashboard-view').classList.contains('active')) {
-        renderLogs();
-        renderMainDashboard();
-        renderDashboardSummary();
-        renderDutyToday();
-        
-        const secHist = document.getElementById('sec-history');
-        if (secHist && secHist.classList.contains('active')) {
-            if (document.getElementById('history-table-container').style.display === 'none') {
-                renderHistoryView();
-            }
-        }
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+        throw new Error("Server rejected the database insertion.");
     }
+
+    // 🟢 ONLY IF DB CONFIRMS: Update the UI
+    localStorage.setItem('attendanceLogs', logsData);
+    lastDataPushTime = Date.now();
+    forceInstantUIRefresh();
 }
 
 async function deleteLog(idNum, dateStr) {
@@ -1460,7 +1465,6 @@ async function handleTimeIn() {
     const btnIn = document.querySelector('.btn-in');
     let animInterval;
 
-    // --- 1. Lock Button & Animate ---
     if (btnIn) {
         if (btnIn.disabled) return;
         btnIn.disabled = true;
@@ -1468,11 +1472,10 @@ async function handleTimeIn() {
         let dots = 0;
         animInterval = setInterval(() => {
             dots = (dots + 1) % 4;
-            btnIn.textContent = "CHECKING" + ".".repeat(dots);
+            btnIn.textContent = "SENDING TO DB" + ".".repeat(dots);
         }, 500);
     }
 
-    // Helper function to explicitly unlock the button
     const stopAnim = () => {
         if (btnIn) {
             clearInterval(animInterval);
@@ -1494,7 +1497,7 @@ async function handleTimeIn() {
         if (!studentId) {
             messageEl.textContent = "Please enter your Student ID Number.";
             messageEl.className = "message error";
-            stopAnim(); // 🟢 INSTANT UNLOCK
+            stopAnim(); 
             return;
         }
 
@@ -1503,26 +1506,24 @@ async function handleTimeIn() {
         if (timeWindow === "TOO_EARLY") {
             messageEl.textContent = "Shift has not started yet. Time In opens at 5:00 AM.";
             messageEl.className = "message error";
-            stopAnim(); // 🟢 INSTANT UNLOCK
+            stopAnim(); 
             return;
         }
         if (timeWindow === "LOCKOUT") {
             messageEl.textContent = "System Locked (12:01 PM - 4:59 PM). If you missed Time In, you are marked Absent.";
             messageEl.className = "message error";
-            stopAnim(); // 🟢 INSTANT UNLOCK
+            stopAnim(); 
             return;
         }
         if (timeWindow === "TIME_OUT_NORMAL" || timeWindow === "TIME_OUT_LATE") {
             messageEl.textContent = "Time In is closed for this shift. It is currently the Time Out period.";
             messageEl.className = "message error";
-            stopAnim(); // 🟢 INSTANT UNLOCK
+            stopAnim(); 
             return;
         }
 
         let actionStr = "Time In";
-        if (timeWindow === "TIME_IN_LATE") {
-            actionStr = "Time In (Late)";
-        }
+        if (timeWindow === "TIME_IN_LATE") actionStr = "Time In (Late)";
 
         const students = JSON.parse(localStorage.getItem('students')) || [];
         let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
@@ -1533,14 +1534,14 @@ async function handleTimeIn() {
         if (!student) {
             messageEl.textContent = "Student ID not found. Please register first.";
             messageEl.className = "message error";
-            stopAnim(); // 🟢 INSTANT UNLOCK
+            stopAnim(); 
             return;
         }
 
         if (!student.assignedDays || !student.assignedDays.includes(shift.dayStr)) {
             messageEl.textContent = `You are not scheduled for duty today (${shift.dayStr}).`;
             messageEl.className = "message error";
-            stopAnim(); // 🟢 INSTANT UNLOCK
+            stopAnim(); 
             return;
         }
 
@@ -1553,7 +1554,7 @@ async function handleTimeIn() {
         if (alreadyTimedIn) {
             messageEl.textContent = "You have already timed in for this shift.";
             messageEl.className = "message error";
-            stopAnim(); // 🟢 INSTANT UNLOCK
+            stopAnim(); 
             return;
         }
 
@@ -1566,30 +1567,54 @@ async function handleTimeIn() {
             details: null
         };
 
-        logs.push(newLog);
+        // 🟢 STRICT METHOD: Prepare data but DO NOT save locally yet
+        const tempLogs = [...logs, newLog];
+        const studentsData = localStorage.getItem('students') || "[]";
+        const logsData = JSON.stringify(tempLogs);
+        const configData = localStorage.getItem('sys_config') || '{"locked":false,"regOpen":false}';
 
-        localStorage.setItem('attendanceLogs', JSON.stringify(logs));
+        // 🟢 DIRECT BACKEND PUSH: Connect directly to DB
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 sec timeout
+
+        const response = await fetch(`${API_BASE_URL}/sync/push`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                students: studentsData,
+                logs: logsData,
+                config: configData
+            }),
+            signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+            throw new Error("Server rejected the database insertion.");
+        }
+
+        // 🟢 ONLY IF DB CONFIRMS: Update the UI and save to memory
+        localStorage.setItem('attendanceLogs', logsData);
         localStorage.setItem('activeDeviceStudent', student.id);
+        lastDataPushTime = Date.now();
         
         messageEl.textContent = `Success: ${student.name} - ${actionStr} at ${shift.realTimeStr}`;
         messageEl.className = "message success";
         idInput.value = ''; 
 
-        await pushLogsToCloud();
-        await new Promise(resolve => setTimeout(resolve, 800));
-
         checkDeviceLock(); 
-        
-        try {
-            if (typeof renderAttendanceLogs === 'function') renderAttendanceLogs();
-            if (typeof renderDashboardSummary === 'function') renderDashboardSummary();
-            if (typeof renderAttendanceSummary === 'function') renderAttendanceSummary();
-        } catch(e) {}
-
+        forceInstantUIRefresh();
         stopAnim(); 
 
     } catch (error) {
         console.error(error);
+        const messageEl = document.getElementById('student-message');
+        if (messageEl) {
+            // 🔴 If it fails, it rejects the Time In entirely
+            messageEl.textContent = "Network Error: Could not reach the Database. Time In was NOT saved.";
+            messageEl.className = "message error";
+        }
         stopAnim(); 
     }
 }
