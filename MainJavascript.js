@@ -201,7 +201,7 @@ window.resolveSync = async function(action) {
 let lastConfigPushTime = 0;
 
 async function pullFromCloud() {
-    if (isSyncing) return; // Prevent multiple syncs from colliding
+    if (isSyncing) return; 
     isSyncing = true;
 
     try {
@@ -524,7 +524,6 @@ async function loginAdmin(event) {
             const tokenPayload = btoa(JSON.stringify({ valid: true, timestamp: Date.now(), role: userRole, username: usernameInput }));
             sessionStorage.setItem('_auth_tkn_x92', tokenPayload);
             
-            // 🟢 NEW: Save the VIP Pass from the backend!
             sessionStorage.setItem('adminSessionToken', data.sessionToken); 
             
             switchView('admin-dashboard-view');
@@ -1077,28 +1076,44 @@ async function logAttendanceAction(student, action, endOfShiftDetails = null, ov
     const logsData = JSON.stringify(tempLogs);
     const configData = localStorage.getItem('sys_config') || '{"locked":false,"regOpen":false}';
 
-    // 🟢 INCREASED TIMEOUT: 25 Seconds
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 25000); 
+    const timeoutId = setTimeout(() => controller.abort(), 20000); 
 
+    // 1. PUSH TO DATABASE
     const response = await fetch(`${API_BASE_URL}/sync/push`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            students: studentsData,
-            logs: logsData,
-            config: configData
-        }),
+        body: JSON.stringify({ students: studentsData, logs: logsData, config: configData }),
         signal: controller.signal
     });
     
     clearTimeout(timeoutId);
+    if (!response.ok) throw new Error("Server rejected the database insertion.");
 
-    if (!response.ok) {
-        throw new Error("Server rejected the database insertion.");
+    // 🟢 2. THE DOUBLE CHECK (Verification)
+    const verifyRes = await fetch(`${API_BASE_URL}/sync/pull?t=${Date.now()}`, {
+        cache: 'no-store',
+        headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
+    });
+
+    if (!verifyRes.ok) throw new Error("Could not verify database entry.");
+    
+    const verifyData = await verifyRes.json();
+    const serverLogs = JSON.parse(verifyData.logs || "[]");
+
+    // Physically check the database
+    const isActuallySaved = serverLogs.some(l => 
+        String(l.id) === String(student.id) && 
+        l.date === dateStr && 
+        l.action === action
+    );
+
+    if (!isActuallySaved) {
+        throw new Error("Verification failed: The database dropped the data.");
     }
 
-    localStorage.setItem('attendanceLogs', logsData);
+    // 🟢 3. ONLY ON VERIFIED SUCCESS: Update UI
+    localStorage.setItem('attendanceLogs', verifyData.logs); // Overwrite with DB truth
     lastDataPushTime = Date.now();
     forceInstantUIRefresh();
 }
@@ -1362,8 +1377,7 @@ async function createManualHistoryDate() {
         alert("Invalid date format. Please use M/D/YYYY (e.g., 5/4/2026).");
         return;
     }
-    
-    // 1. Lock the background sync immediately!
+
     lastDataPushTime = Date.now();
 
     await pullFromCloud();
@@ -1471,7 +1485,7 @@ async function handleTimeIn() {
         let dots = 0;
         animInterval = setInterval(() => {
             dots = (dots + 1) % 4;
-            btnIn.textContent = "SAVING TO DB" + ".".repeat(dots);
+            btnIn.textContent = "SAVING YOUR TIME IN" + ".".repeat(dots);
         }, 500);
     }
 
@@ -1485,7 +1499,6 @@ async function handleTimeIn() {
     };
 
     try {
-        // Force a pull to ensure we aren't duplicating data
         await pullFromCloud();
 
         const idInput = document.getElementById('student-id-input'); 
@@ -1494,12 +1507,7 @@ async function handleTimeIn() {
         if (!idInput || !messageEl) { stopAnim(); return; }
         const studentId = idInput.value.trim();
 
-        if (!studentId) {
-            messageEl.textContent = "Please enter your Student ID Number.";
-            messageEl.className = "message error";
-            stopAnim(); 
-            return;
-        }
+        if (!studentId) { messageEl.textContent = "Please enter your Student ID Number."; messageEl.className = "message error"; stopAnim(); return; }
 
         const timeWindow = getCurrentTimeWindow();
 
@@ -1516,27 +1524,11 @@ async function handleTimeIn() {
 
         const student = students.find(s => String(s.id).toLowerCase() === studentId.toLowerCase());
         
-        if (!student) {
-            messageEl.textContent = "Student ID not found. Please register first.";
-            messageEl.className = "message error";
-            stopAnim(); 
-            return;
-        }
-
-        if (!student.assignedDays || !student.assignedDays.includes(shift.dayStr)) {
-            messageEl.textContent = `You are not scheduled for duty today (${shift.dayStr}).`;
-            messageEl.className = "message error";
-            stopAnim(); 
-            return;
-        }
+        if (!student) { messageEl.textContent = "Student ID not found. Please register first."; messageEl.className = "message error"; stopAnim(); return; }
+        if (!student.assignedDays || !student.assignedDays.includes(shift.dayStr)) { messageEl.textContent = `You are not scheduled for duty today (${shift.dayStr}).`; messageEl.className = "message error"; stopAnim(); return; }
 
         const alreadyTimedIn = logs.some(l => String(l.id).toLowerCase() === studentId.toLowerCase() && l.date === shift.dateStr && l.action.includes('Time In'));
-        if (alreadyTimedIn) {
-            messageEl.textContent = "You have already timed in for this shift.";
-            messageEl.className = "message error";
-            stopAnim(); 
-            return;
-        }
+        if (alreadyTimedIn) { messageEl.textContent = "You have already timed in for this shift."; messageEl.className = "message error"; stopAnim(); return; }
 
         const newLog = {
             name: student.name,
@@ -1552,29 +1544,46 @@ async function handleTimeIn() {
         const logsData = JSON.stringify(tempLogs);
         const configData = localStorage.getItem('sys_config') || '{"locked":false,"regOpen":false}';
 
-        // 🟢 INCREASED TIMEOUT: 25 Seconds before throwing an error
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 25000); 
+        const timeoutId = setTimeout(() => controller.abort(), 20000); 
 
+        // 1. PUSH TO DATABASE
         const response = await fetch(`${API_BASE_URL}/sync/push`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                students: studentsData,
-                logs: logsData,
-                config: configData
-            }),
+            body: JSON.stringify({ students: studentsData, logs: logsData, config: configData }),
             signal: controller.signal
         });
         
         clearTimeout(timeoutId);
+        if (!response.ok) throw new Error("Server rejected the database insertion.");
 
-        if (!response.ok) {
-            throw new Error("Server rejected the database insertion.");
+        // 🟢 2. THE DOUBLE CHECK (Verification)
+        if (btnIn) btnIn.textContent = "VERIFYING...";
+        
+        const verifyRes = await fetch(`${API_BASE_URL}/sync/pull?t=${Date.now()}`, {
+            cache: 'no-store',
+            headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
+        });
+
+        if (!verifyRes.ok) throw new Error("Could not verify database entry.");
+        
+        const verifyData = await verifyRes.json();
+        const serverLogs = JSON.parse(verifyData.logs || "[]");
+
+        // Physically check the database to see if the log exists
+        const isActuallySaved = serverLogs.some(l => 
+            String(l.id) === String(student.id) && 
+            l.date === shift.dateStr && 
+            l.action === actionStr
+        );
+
+        if (!isActuallySaved) {
+            throw new Error("Verification failed: The database dropped the data.");
         }
 
-        // 🟢 ONLY IF DB CONFIRMS
-        localStorage.setItem('attendanceLogs', logsData);
+        // 🟢 3. ONLY ON VERIFIED SUCCESS: Update UI with strict Database Data
+        localStorage.setItem('attendanceLogs', verifyData.logs); // Overwrite with DB truth
         localStorage.setItem('activeDeviceStudent', student.id);
         lastDataPushTime = Date.now();
         
@@ -1590,7 +1599,7 @@ async function handleTimeIn() {
         console.error(error);
         const messageEl = document.getElementById('student-message');
         if (messageEl) {
-            messageEl.textContent = "Network Error: Could not reach the Database. Time In was NOT saved.";
+            messageEl.textContent = "Error: System failed to save to database. Please try again.";
             messageEl.className = "message error";
         }
         stopAnim(); 
@@ -3602,9 +3611,9 @@ function checkDeviceLock() {
                 btnIn.style.display = 'none'; 
                 lockMsg.style.display = 'block';
                 
-                lockMsg.innerHTML = `🔒 Device locked to <strong>${student.name || 'Unknown'}</strong>.<br>
+                lockMsg.innerHTML = `✔️ Time In is saved! to <strong>${student.name || 'Unknown'}</strong>.<br>
                 <span style="font-size: 0.85rem; color: var(--text-main);">Time In: <span style="color: var(--success); font-weight: bold;">${timeInLog.time}</span></span><br>
-                <span style="font-size: 0.75rem; color: var(--text-muted); margin-top: 5px; display: inline-block;">You must Time Out to free this device.</span>`;
+                <span style="font-size: 0.75rem; color: var(--text-muted); margin-top: 5px; display: inline-block;">Continue your OS Duty till 5pm - 12am to time out</span>`;
                 return; 
             }
         }
@@ -3873,12 +3882,10 @@ async function autoRestoreServerData() {
         
         const serverAccounts = await response.json();
         
-        // If the server ONLY has the default DEVELOPER account, Render wiped the disk!
         if (serverAccounts.length === 1 && serverAccounts[0].username === 'DEVELOPER') {
             isServerRebooting = true;
             console.warn("⚠️ Server wipe detected! Restoring accounts from Cloud Backup...");
             
-            // Force pull latest data from cloud just to be safe
             try { await pullFromCloud(); } catch(e) {}
             
             const backup = JSON.parse(localStorage.getItem('cloud_accounts_backup')) || [];
