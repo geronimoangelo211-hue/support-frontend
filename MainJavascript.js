@@ -200,39 +200,51 @@ window.resolveSync = async function(action) {
 
 let lastConfigPushTime = 0;
 
-async function pushLogsToCloud() {
-    lastDataPushTime = Date.now(); 
-
-    const studentsData = localStorage.getItem('students') || "[]";
-    const logsData = localStorage.getItem('attendanceLogs') || "[]";
-    const configData = localStorage.getItem('sys_config') || '{"locked":false,"regOpen":false}';
-    
+async function pullFromCloud() {
     try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10-second timeout
-
-        const response = await fetch(`${API_BASE_URL}/sync/push`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                students: studentsData,
-                logs: logsData,
-                config: configData
-            }),
-            signal: controller.signal
+        // 1. The "?t=..." cache-buster forces the browser to pull FRESH data from Supabase
+        const timestamp = new Date().getTime();
+        const response = await fetch(`${API_BASE_URL}/sync/pull?t=${timestamp}`, {
+            cache: 'no-store',
+            headers: {
+                'Cache-Control': 'no-cache',
+                'Pragma': 'no-cache'
+            }
         });
-        
-        clearTimeout(timeoutId);
 
         if (response.ok) {
-            console.log("Cloud sync successful.");
-        } else {
-            throw new Error("Server rejected push with status: " + response.status);
+            const data = await response.json();
+            
+            const serverHasStudents = (data.students && data.students !== "[]" && data.students !== "null");
+            const serverHasLogs = (data.logs && data.logs !== "[]" && data.logs !== "null");
+
+            const localStudents = localStorage.getItem('students');
+            const localLogs = localStorage.getItem('attendanceLogs');
+
+            // 2. If Supabase is totally empty but you have local students, push them up!
+            if (!serverHasStudents && !serverHasLogs && (localStudents || localLogs)) {
+                await pushLogsToCloud();
+                return; 
+            }
+
+            if (Date.now() - lastDataPushTime > 10000) {
+                if (serverHasStudents) localStorage.setItem('students', data.students);
+                if (serverHasLogs) localStorage.setItem('attendanceLogs', data.logs);
+                
+                if (data.config && data.config !== "{}" && data.config !== "null") {
+                    localStorage.setItem('sys_config', data.config);
+                    applySystemConfig(); 
+                }
+
+                if (document.getElementById('admin-dashboard-view').classList.contains('active')) {
+                    if (typeof renderStudents === 'function') renderStudents();
+                    if (typeof renderLogs === 'function') renderLogs();
+                    if (typeof renderSchedule === 'function') renderSchedule();
+                }
+            }
         }
     } catch (e) {
-        // We log the error but DO NOT wipe the local storage. 
-        // The pullFromCloud function will save the data and try again later.
-        console.warn("Cloud push delayed due to poor network. Data is safe locally.", e.message);
+        console.error("Cloud pull failed.", e);
     }
 }
 
@@ -287,17 +299,16 @@ function getShiftDateDetails() {
         if (simStr) simSettings = JSON.parse(simStr);
     } catch(e) {}
 
-    let manualDayOverride = null;
-
     if (simSettings && simSettings.active) {
         if (simSettings.date && simSettings.time) {
             now = new Date(`${simSettings.date}T${simSettings.time}`);
         } else if (simSettings.date) {
-            now = new Date(`${simSettings.date}T${now.toTimeString().split(' ')[0]}`);
+            const timeString = now.toTimeString().split(' ')[0];
+            now = new Date(`${simSettings.date}T${timeString}`);
         } else if (simSettings.time) {
-            now = new Date(`${now.toISOString().split('T')[0]}T${simSettings.time}`);
+            const dateString = now.toISOString().split('T')[0];
+            now = new Date(`${dateString}T${simSettings.time}`);
         }
-        if (simSettings.day) manualDayOverride = simSettings.day;
     }
 
     // --- SHIFT ROLLOVER LOGIC (4:01 AM) ---
@@ -305,31 +316,23 @@ function getShiftDateDetails() {
     const minutes = now.getMinutes();
     
     let shiftDateObj = new Date(now.getTime());
-    let isRollover = false;
-    
+    // If it is between 12:00 AM (0) and 4:00 AM, subtract 1 day.
     if (hours < 4 || (hours === 4 && minutes === 0)) {
         shiftDateObj.setDate(shiftDateObj.getDate() - 1);
-        isRollover = true; 
     }
 
-    // 🟢 SAFE FIX: Standard parsing + RegEx replacement (Will not crash on iOS!)
     const optionsDate = { timeZone: 'Asia/Manila', year: 'numeric', month: 'numeric', day: 'numeric' };
-    const dateStr = shiftDateObj.toLocaleDateString('en-US', optionsDate).replace(/[\u202f\u200b]/g, ' ');
+    const dateStr = shiftDateObj.toLocaleDateString('en-US', optionsDate);
 
     const optionsTime = { timeZone: 'Asia/Manila', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true };
-    const realTimeStr = now.toLocaleTimeString('en-US', optionsTime).replace(/[\u202f\u200b]/g, ' ');
+    const realTimeStr = now.toLocaleTimeString('en-US', optionsTime);
 
     const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     let dayStr = dayNames[shiftDateObj.getDay()];
 
-    if (manualDayOverride && !simSettings.date) {
-        let forcedDayIndex = dayNames.indexOf(manualDayOverride);
-        if (isRollover) {
-            forcedDayIndex -= 1;
-            if (forcedDayIndex < 0) forcedDayIndex = 6; 
-        }
-        dayStr = dayNames[forcedDayIndex];
-    } 
+    if (simSettings && simSettings.active && simSettings.day) {
+        dayStr = simSettings.day;
+    }
 
     return { 
         dateStr, 
@@ -1048,7 +1051,7 @@ async function toggleAssignedDay(studentId, dayStr, btnElement) {
 async function logAttendanceAction(student, action, endOfShiftDetails = null, overrideDateStr = null) {
     if(isBackendLocked) {
         alert("The system is currently locked. Attendance cannot be recorded.");
-        throw new Error("System locked");
+        return;
     }
 
     const shift = getShiftDateDetails();
@@ -1064,41 +1067,36 @@ async function logAttendanceAction(student, action, endOfShiftDetails = null, ov
     };
 
     let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
+    let wasTombstoned = false;
+    
     if(logs.some(l => l.id === 'SYS_DELETED_DATE' && l.date === dateStr)) {
         logs = logs.filter(l => !(l.id === 'SYS_DELETED_DATE' && l.date === dateStr));
+        wasTombstoned = true;
     }
 
-    // 🟢 STRICT METHOD: Prepare data but DO NOT save locally yet
-    const tempLogs = [...logs, newLog];
-    const studentsData = localStorage.getItem('students') || "[]";
-    const logsData = JSON.stringify(tempLogs);
-    const configData = localStorage.getItem('sys_config') || '{"locked":false,"regOpen":false}';
+    logs.push(newLog);
+    localStorage.setItem('attendanceLogs', JSON.stringify(logs));
 
-    // 🟢 DIRECT BACKEND PUSH
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 sec timeout
-
-    const response = await fetch(`${API_BASE_URL}/sync/push`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            students: studentsData,
-            logs: logsData,
-            config: configData
-        }),
-        signal: controller.signal
-    });
+    // FIX: Removed the old dead endpoints and connected it to the Cloud Sync Engine
+    try {
+        await pushLogsToCloud();
+    } catch (e) {
+        console.error("Failed to push attendance log to cloud.");
+    }
     
-    clearTimeout(timeoutId);
-
-    if (!response.ok) {
-        throw new Error("Server rejected the database insertion.");
+    if (document.getElementById('admin-dashboard-view').classList.contains('active')) {
+        renderLogs();
+        renderMainDashboard();
+        renderDashboardSummary();
+        renderDutyToday();
+        
+        const secHist = document.getElementById('sec-history');
+        if (secHist && secHist.classList.contains('active')) {
+            if (document.getElementById('history-table-container').style.display === 'none') {
+                renderHistoryView();
+            }
+        }
     }
-
-    // 🟢 ONLY IF DB CONFIRMS: Update the UI
-    localStorage.setItem('attendanceLogs', logsData);
-    lastDataPushTime = Date.now();
-    forceInstantUIRefresh();
 }
 
 async function deleteLog(idNum, dateStr) {
@@ -1462,6 +1460,7 @@ async function handleTimeIn() {
     const btnIn = document.querySelector('.btn-in');
     let animInterval;
 
+    // --- 1. Lock Button & Animate ---
     if (btnIn) {
         if (btnIn.disabled) return;
         btnIn.disabled = true;
@@ -1469,10 +1468,11 @@ async function handleTimeIn() {
         let dots = 0;
         animInterval = setInterval(() => {
             dots = (dots + 1) % 4;
-            btnIn.textContent = "SENDING TO DB" + ".".repeat(dots);
+            btnIn.textContent = "CHECKING" + ".".repeat(dots);
         }, 500);
     }
 
+    // Helper function to explicitly unlock the button
     const stopAnim = () => {
         if (btnIn) {
             clearInterval(animInterval);
@@ -1494,7 +1494,7 @@ async function handleTimeIn() {
         if (!studentId) {
             messageEl.textContent = "Please enter your Student ID Number.";
             messageEl.className = "message error";
-            stopAnim(); 
+            stopAnim(); // 🟢 INSTANT UNLOCK
             return;
         }
 
@@ -1503,24 +1503,26 @@ async function handleTimeIn() {
         if (timeWindow === "TOO_EARLY") {
             messageEl.textContent = "Shift has not started yet. Time In opens at 5:00 AM.";
             messageEl.className = "message error";
-            stopAnim(); 
+            stopAnim(); // 🟢 INSTANT UNLOCK
             return;
         }
         if (timeWindow === "LOCKOUT") {
             messageEl.textContent = "System Locked (12:01 PM - 4:59 PM). If you missed Time In, you are marked Absent.";
             messageEl.className = "message error";
-            stopAnim(); 
+            stopAnim(); // 🟢 INSTANT UNLOCK
             return;
         }
         if (timeWindow === "TIME_OUT_NORMAL" || timeWindow === "TIME_OUT_LATE") {
             messageEl.textContent = "Time In is closed for this shift. It is currently the Time Out period.";
             messageEl.className = "message error";
-            stopAnim(); 
+            stopAnim(); // 🟢 INSTANT UNLOCK
             return;
         }
 
         let actionStr = "Time In";
-        if (timeWindow === "TIME_IN_LATE") actionStr = "Time In (Late)";
+        if (timeWindow === "TIME_IN_LATE") {
+            actionStr = "Time In (Late)";
+        }
 
         const students = JSON.parse(localStorage.getItem('students')) || [];
         let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
@@ -1531,14 +1533,14 @@ async function handleTimeIn() {
         if (!student) {
             messageEl.textContent = "Student ID not found. Please register first.";
             messageEl.className = "message error";
-            stopAnim(); 
+            stopAnim(); // 🟢 INSTANT UNLOCK
             return;
         }
 
         if (!student.assignedDays || !student.assignedDays.includes(shift.dayStr)) {
             messageEl.textContent = `You are not scheduled for duty today (${shift.dayStr}).`;
             messageEl.className = "message error";
-            stopAnim(); 
+            stopAnim(); // 🟢 INSTANT UNLOCK
             return;
         }
 
@@ -1551,7 +1553,7 @@ async function handleTimeIn() {
         if (alreadyTimedIn) {
             messageEl.textContent = "You have already timed in for this shift.";
             messageEl.className = "message error";
-            stopAnim(); 
+            stopAnim(); // 🟢 INSTANT UNLOCK
             return;
         }
 
@@ -1564,52 +1566,30 @@ async function handleTimeIn() {
             details: null
         };
 
-        const tempLogs = [...logs, newLog];
-        const studentsData = localStorage.getItem('students') || "[]";
-        const logsData = JSON.stringify(tempLogs);
-        const configData = localStorage.getItem('sys_config') || '{"locked":false,"regOpen":false}';
+        logs.push(newLog);
 
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 sec timeout
-
-        const response = await fetch(`${API_BASE_URL}/sync/push`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                students: studentsData,
-                logs: logsData,
-                config: configData
-            }),
-            signal: controller.signal
-        });
-        
-        clearTimeout(timeoutId);
-
-        if (!response.ok) {
-            throw new Error("Server rejected the database insertion.");
-        }
-
-        // 🟢 ONLY IF DB CONFIRMS: Update the UI and save to memory
-        localStorage.setItem('attendanceLogs', logsData);
+        localStorage.setItem('attendanceLogs', JSON.stringify(logs));
         localStorage.setItem('activeDeviceStudent', student.id);
-        lastDataPushTime = Date.now();
         
         messageEl.textContent = `Success: ${student.name} - ${actionStr} at ${shift.realTimeStr}`;
         messageEl.className = "message success";
         idInput.value = ''; 
 
+        await pushLogsToCloud();
+        await new Promise(resolve => setTimeout(resolve, 800));
+
         checkDeviceLock(); 
-        forceInstantUIRefresh();
+        
+        try {
+            if (typeof renderAttendanceLogs === 'function') renderAttendanceLogs();
+            if (typeof renderDashboardSummary === 'function') renderDashboardSummary();
+            if (typeof renderAttendanceSummary === 'function') renderAttendanceSummary();
+        } catch(e) {}
+
         stopAnim(); 
 
     } catch (error) {
         console.error(error);
-        const messageEl = document.getElementById('student-message');
-        if (messageEl) {
-            // 🔴 If it fails, it rejects the Time In entirely
-            messageEl.textContent = "Network Error: Could not reach the Database. Time In was NOT saved.";
-            messageEl.className = "message error";
-        }
         stopAnim(); 
     }
 }
@@ -1698,13 +1678,12 @@ async function finalizeTimeOut() {
 
     const submitBtn = document.querySelector('#timeout-modal .btn-primary');
     if(submitBtn) {
-        submitBtn.textContent = "SENDING TO DB...";
+        submitBtn.textContent = "SAVING...";
         submitBtn.disabled = true;
         submitBtn.style.opacity = "0.7";
     }
 
     try {
-        // 🟢 This now awaits a DIRECT Database confirmation
         await logAttendanceAction(pendingTimeOutStudent, pendingTimeOutAction, {
             gcHandle: gcHandle,
             announcement: announcement.value,
@@ -1723,10 +1702,6 @@ async function finalizeTimeOut() {
         
         initSliderCaptcha(); 
         checkDeviceLock(); 
-    } catch(error) {
-        console.error(error);
-        // 🔴 Shows error explicitly on the modal if it fails
-        showMessage('timeout-modal-message', 'Database connection failed. Time Out was NOT saved. Try again.', 'error');
     } finally {
         if(submitBtn) {
             submitBtn.textContent = "Submit & Time Out";
