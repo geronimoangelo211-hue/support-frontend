@@ -200,51 +200,39 @@ window.resolveSync = async function(action) {
 
 let lastConfigPushTime = 0;
 
-async function pullFromCloud() {
+async function pushLogsToCloud() {
+    lastDataPushTime = Date.now(); 
+
+    const studentsData = localStorage.getItem('students') || "[]";
+    const logsData = localStorage.getItem('attendanceLogs') || "[]";
+    const configData = localStorage.getItem('sys_config') || '{"locked":false,"regOpen":false}';
+    
     try {
-        // 1. The "?t=..." cache-buster forces the browser to pull FRESH data from Supabase
-        const timestamp = new Date().getTime();
-        const response = await fetch(`${API_BASE_URL}/sync/pull?t=${timestamp}`, {
-            cache: 'no-store',
-            headers: {
-                'Cache-Control': 'no-cache',
-                'Pragma': 'no-cache'
-            }
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10-second timeout
+
+        const response = await fetch(`${API_BASE_URL}/sync/push`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                students: studentsData,
+                logs: logsData,
+                config: configData
+            }),
+            signal: controller.signal
         });
+        
+        clearTimeout(timeoutId);
 
         if (response.ok) {
-            const data = await response.json();
-            
-            const serverHasStudents = (data.students && data.students !== "[]" && data.students !== "null");
-            const serverHasLogs = (data.logs && data.logs !== "[]" && data.logs !== "null");
-
-            const localStudents = localStorage.getItem('students');
-            const localLogs = localStorage.getItem('attendanceLogs');
-
-            // 2. If Supabase is totally empty but you have local students, push them up!
-            if (!serverHasStudents && !serverHasLogs && (localStudents || localLogs)) {
-                await pushLogsToCloud();
-                return; 
-            }
-
-            if (Date.now() - lastDataPushTime > 10000) {
-                if (serverHasStudents) localStorage.setItem('students', data.students);
-                if (serverHasLogs) localStorage.setItem('attendanceLogs', data.logs);
-                
-                if (data.config && data.config !== "{}" && data.config !== "null") {
-                    localStorage.setItem('sys_config', data.config);
-                    applySystemConfig(); 
-                }
-
-                if (document.getElementById('admin-dashboard-view').classList.contains('active')) {
-                    if (typeof renderStudents === 'function') renderStudents();
-                    if (typeof renderLogs === 'function') renderLogs();
-                    if (typeof renderSchedule === 'function') renderSchedule();
-                }
-            }
+            console.log("Cloud sync successful.");
+        } else {
+            throw new Error("Server rejected push with status: " + response.status);
         }
     } catch (e) {
-        console.error("Cloud pull failed.", e);
+        // We log the error but DO NOT wipe the local storage. 
+        // The pullFromCloud function will save the data and try again later.
+        console.warn("Cloud push delayed due to poor network. Data is safe locally.", e.message);
     }
 }
 
@@ -299,40 +287,56 @@ function getShiftDateDetails() {
         if (simStr) simSettings = JSON.parse(simStr);
     } catch(e) {}
 
+    let manualDayOverride = null;
+
     if (simSettings && simSettings.active) {
         if (simSettings.date && simSettings.time) {
             now = new Date(`${simSettings.date}T${simSettings.time}`);
         } else if (simSettings.date) {
-            const timeString = now.toTimeString().split(' ')[0];
-            now = new Date(`${simSettings.date}T${timeString}`);
+            now = new Date(`${simSettings.date}T${now.toTimeString().split(' ')[0]}`);
         } else if (simSettings.time) {
-            const dateString = now.toISOString().split('T')[0];
-            now = new Date(`${dateString}T${simSettings.time}`);
+            now = new Date(`${now.toISOString().split('T')[0]}T${simSettings.time}`);
         }
+        if (simSettings.day) manualDayOverride = simSettings.day;
     }
 
-    // --- SHIFT ROLLOVER LOGIC (4:01 AM) ---
     const hours = now.getHours();
     const minutes = now.getMinutes();
     
     let shiftDateObj = new Date(now.getTime());
-    // If it is between 12:00 AM (0) and 4:00 AM, subtract 1 day.
+    let isRollover = false;
+    
     if (hours < 4 || (hours === 4 && minutes === 0)) {
         shiftDateObj.setDate(shiftDateObj.getDate() - 1);
+        isRollover = true; 
     }
 
-    const optionsDate = { timeZone: 'Asia/Manila', year: 'numeric', month: 'numeric', day: 'numeric' };
-    const dateStr = shiftDateObj.toLocaleDateString('en-US', optionsDate);
+    let mDate = new Date(shiftDateObj.toLocaleString('en-US', { timeZone: 'Asia/Manila' }));
+    const dateStr = `${mDate.getMonth() + 1}/${mDate.getDate()}/${mDate.getFullYear()}`;
 
-    const optionsTime = { timeZone: 'Asia/Manila', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true };
-    const realTimeStr = now.toLocaleTimeString('en-US', optionsTime);
+    let mNow = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Manila' }));
+    let h = mNow.getHours();
+    let m = mNow.getMinutes();
+    let s = mNow.getSeconds();
+    let ampm = h >= 12 ? 'PM' : 'AM';
+    h = h % 12;
+    h = h ? h : 12;
+    let hStr = h < 10 ? '0' + h : h;
+    let mStr = m < 10 ? '0' + m : m;
+    let sStr = s < 10 ? '0' + s : s;
+    const realTimeStr = `${hStr}:${mStr}:${sStr} ${ampm}`;
 
     const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     let dayStr = dayNames[shiftDateObj.getDay()];
 
-    if (simSettings && simSettings.active && simSettings.day) {
-        dayStr = simSettings.day;
-    }
+    if (manualDayOverride && !simSettings.date) {
+        let forcedDayIndex = dayNames.indexOf(manualDayOverride);
+        if (isRollover) {
+            forcedDayIndex -= 1;
+            if (forcedDayIndex < 0) forcedDayIndex = 6; 
+        }
+        dayStr = dayNames[forcedDayIndex];
+    } 
 
     return { 
         dateStr, 
