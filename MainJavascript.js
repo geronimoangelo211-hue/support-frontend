@@ -4664,10 +4664,12 @@ let serverStatusCheckTimer = null;
 let serverTextCycleTimer = null;
 
 function checkServerStatus() {
+    // Admin Elements
     const adminDot = document.getElementById('server-status-dot');
     const adminText = document.getElementById('server-status-text');
     const loginBtn = document.querySelector('#admin-login-view .btn-primary');
     
+    // Student Elements
     const studentDot = document.getElementById('student-server-dot');
     const studentText = document.getElementById('student-server-text');
     const btnIn = document.querySelector('.btn-in');
@@ -4680,9 +4682,8 @@ function checkServerStatus() {
         "Server Rebooting...", 
         "Connecting to Database...", 
         "Please wait...", 
-        "Opening up system..."
+        "Waking up system..."
     ];
-
     let msgIndex = 0;
 
     // Set UI to "Waking Up" state
@@ -4707,10 +4708,10 @@ function checkServerStatus() {
 
     const pingBackend = async () => {
         try {
-            // A lightweight ping just to wake the server
-            const res = await fetch(`${API_BASE_URL}/status`, { cache: 'no-store' });
+            // 🟢 FIX 1: Hit the public Config endpoint to completely bypass CORS / 401 errors
+            const res = await fetch(`${API_BASE_URL}/config/status`, { cache: 'no-store' });
             
-            if (res.ok || res.status === 401 || res.status === 404) { 
+            if (res.ok) { 
                 clearInterval(serverTextCycleTimer);
                 clearInterval(serverStatusCheckTimer);
                 
@@ -4722,16 +4723,21 @@ function checkServerStatus() {
                 
                 if (loginBtn) { loginBtn.disabled = false; loginBtn.style.opacity = '1'; loginBtn.textContent = 'Login'; }
                 
+                // 🟢 FIX 2: Restore the actual text on the student buttons!
+                if (btnIn) { btnIn.textContent = 'Time In'; }
+                if (btnOut) { btnOut.textContent = 'Time Out'; }
+                
                 // Let applySystemConfig handle unlocking the student buttons based on real lock status
                 applySystemConfig(); 
             }
         } catch (error) {
-            // Still sleeping, will try again in 5 seconds
+            // Still sleeping or network error, will try again in 5 seconds
+            console.log("Server still waking up...");
         }
     };
 
     pingBackend(); 
-    serverStatusCheckTimer = setInterval(pingBackend, 5000);
+    serverStatusCheckTimer = setInterval(pingBackend, 5000); // Ping every 5 seconds until awake
 }
 
 let selectedPerfStudentId = null;
