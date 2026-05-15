@@ -1896,8 +1896,7 @@ async function switchView(viewId) {
         }
         checkBackendLockStatus(); 
     } 
-    // 🟢 THIS TRIGGERS THE SERVER BOOT CHECKER 🟢
-    else if (viewId === 'admin-login-view') {
+    if (viewId === 'admin-login-view' || viewId === 'student-view') {
         checkServerStatus(); 
     }
     
@@ -4665,67 +4664,74 @@ let serverStatusCheckTimer = null;
 let serverTextCycleTimer = null;
 
 function checkServerStatus() {
-    const dot = document.getElementById('server-status-dot');
-    const text = document.getElementById('server-status-text');
+    const adminDot = document.getElementById('server-status-dot');
+    const adminText = document.getElementById('server-status-text');
     const loginBtn = document.querySelector('#admin-login-view .btn-primary');
     
-    if (!dot || !text) return;
+    const studentDot = document.getElementById('student-server-dot');
+    const studentText = document.getElementById('student-server-text');
+    const btnIn = document.querySelector('.btn-in');
+    const btnOut = document.querySelector('.btn-out');
 
     clearInterval(serverStatusCheckTimer);
     clearInterval(serverTextCycleTimer);
     
     const bootMessages = [
         "Server Rebooting...", 
-        "Added Database...", 
+        "Connecting to Database...", 
         "Please wait...", 
-        "One moment...", 
-        "Cache cleaning..."
+        "Opening up system..."
     ];
+
     let msgIndex = 0;
 
-    dot.style.backgroundColor = '#f59e0b'; 
-    dot.style.boxShadow = '0 0 8px #f59e0b';
-    dot.style.animation = 'pulse-server 1.5s infinite';
-    text.style.color = '#f59e0b';
-    text.textContent = bootMessages[0];
-    
-    if (loginBtn) {
-        loginBtn.disabled = true;
-        loginBtn.style.opacity = '0.4';
-        loginBtn.textContent = 'WAKING SERVER...';
-    }
+    // Set UI to "Waking Up" state
+    const setWakingUI = () => {
+        if (adminDot) { adminDot.style.backgroundColor = '#f59e0b'; adminDot.style.animation = 'pulse-server 1.5s infinite'; }
+        if (studentDot) { studentDot.style.backgroundColor = '#f59e0b'; studentDot.style.animation = 'pulse-server 1.5s infinite'; }
+        if (adminText) { adminText.style.color = '#f59e0b'; adminText.textContent = bootMessages[msgIndex]; }
+        if (studentText) { studentText.style.color = '#f59e0b'; studentText.textContent = bootMessages[msgIndex]; }
+        
+        if (loginBtn) { loginBtn.disabled = true; loginBtn.style.opacity = '0.4'; loginBtn.textContent = 'WAKING SERVER...'; }
+        if (btnIn) { btnIn.disabled = true; btnIn.style.opacity = '0.4'; btnIn.textContent = 'WAIT...'; }
+        if (btnOut) { btnOut.disabled = true; btnOut.style.opacity = '0.4'; btnOut.textContent = 'WAIT...'; }
+    };
+
+    setWakingUI();
 
     serverTextCycleTimer = setInterval(() => {
         msgIndex = (msgIndex + 1) % bootMessages.length;
-        text.textContent = bootMessages[msgIndex];
+        if (adminText) adminText.textContent = bootMessages[msgIndex];
+        if (studentText) studentText.textContent = bootMessages[msgIndex];
     }, 3000);
 
     const pingBackend = async () => {
         try {
-            const res = await fetch(`${API_BASE_URL}/accounts`, { cache: 'no-store' });
+            // A lightweight ping just to wake the server
+            const res = await fetch(`${API_BASE_URL}/status`, { cache: 'no-store' });
             
-            if (res.ok || res.status === 401 || res.status === 403) { 
+            if (res.ok || res.status === 401 || res.status === 404) { 
                 clearInterval(serverTextCycleTimer);
                 clearInterval(serverStatusCheckTimer);
                 
-                dot.style.backgroundColor = 'var(--success, #22c55e)'; // Green
-                dot.style.boxShadow = '0 0 10px var(--success, #22c55e)';
-                dot.style.animation = 'none';
-                text.style.color = 'var(--success, #22c55e)';
-                text.textContent = 'Server Online';
+                // Set UI to "Online" state
+                if (adminDot) { adminDot.style.backgroundColor = 'var(--success)'; adminDot.style.animation = 'none'; }
+                if (studentDot) { studentDot.style.backgroundColor = 'var(--success)'; studentDot.style.animation = 'none'; }
+                if (adminText) { adminText.style.color = 'var(--success)'; adminText.textContent = 'Server Online'; }
+                if (studentText) { studentText.style.color = 'var(--success)'; studentText.textContent = 'Ready for Attendance'; }
                 
-                if (loginBtn) {
-                    loginBtn.disabled = false;
-                    loginBtn.style.opacity = '1';
-                    loginBtn.textContent = 'Login';
-                }
+                if (loginBtn) { loginBtn.disabled = false; loginBtn.style.opacity = '1'; loginBtn.textContent = 'Login'; }
+                
+                // Let applySystemConfig handle unlocking the student buttons based on real lock status
+                applySystemConfig(); 
             }
         } catch (error) {
+            // Still sleeping, will try again in 5 seconds
         }
     };
 
     pingBackend(); 
-    serverStatusCheckTimer = setInterval(pingBackend, 5000); // Ping every 5 seconds until awake
+    serverStatusCheckTimer = setInterval(pingBackend, 5000);
 }
 
 let selectedPerfStudentId = null;
