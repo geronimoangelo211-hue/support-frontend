@@ -201,50 +201,47 @@ window.resolveSync = async function(action) {
 let lastConfigPushTime = 0;
 
 async function pullFromCloud() {
+    if (isSyncing) return; // Prevent multiple syncs from colliding
+    isSyncing = true;
+
     try {
-        // 1. The "?t=..." cache-buster forces the browser to pull FRESH data from Supabase
         const timestamp = new Date().getTime();
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 sec for pull
+
         const response = await fetch(`${API_BASE_URL}/sync/pull?t=${timestamp}`, {
             cache: 'no-store',
-            headers: {
-                'Cache-Control': 'no-cache',
-                'Pragma': 'no-cache'
-            }
+            headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
+            signal: controller.signal
         });
+        
+        clearTimeout(timeoutId);
 
         if (response.ok) {
             const data = await response.json();
             
-            const serverHasStudents = (data.students && data.students !== "[]" && data.students !== "null");
-            const serverHasLogs = (data.logs && data.logs !== "[]" && data.logs !== "null");
-
-            const localStudents = localStorage.getItem('students');
-            const localLogs = localStorage.getItem('attendanceLogs');
-
-            // 2. If Supabase is totally empty but you have local students, push them up!
-            if (!serverHasStudents && !serverHasLogs && (localStudents || localLogs)) {
-                await pushLogsToCloud();
-                return; 
+            // 🟢 STRICT DATABASE OVERRIDE: The Database is King. No merging.
+            if (data.students && data.students !== "null") {
+                localStorage.setItem('students', data.students);
+            }
+            if (data.logs && data.logs !== "null") {
+                localStorage.setItem('attendanceLogs', data.logs);
+            }
+            if (data.config && data.config !== "{}" && data.config !== "null") {
+                localStorage.setItem('sys_config', data.config);
+                applySystemConfig(); 
             }
 
-            if (Date.now() - lastDataPushTime > 10000) {
-                if (serverHasStudents) localStorage.setItem('students', data.students);
-                if (serverHasLogs) localStorage.setItem('attendanceLogs', data.logs);
-                
-                if (data.config && data.config !== "{}" && data.config !== "null") {
-                    localStorage.setItem('sys_config', data.config);
-                    applySystemConfig(); 
-                }
-
-                if (document.getElementById('admin-dashboard-view').classList.contains('active')) {
-                    if (typeof renderStudents === 'function') renderStudents();
-                    if (typeof renderLogs === 'function') renderLogs();
-                    if (typeof renderSchedule === 'function') renderSchedule();
-                }
+            if (document.getElementById('admin-dashboard-view').classList.contains('active')) {
+                if (typeof renderStudents === 'function') renderStudents();
+                if (typeof renderLogs === 'function') renderLogs();
+                if (typeof renderSchedule === 'function') renderSchedule();
             }
         }
     } catch (e) {
-        console.error("Cloud pull failed.", e);
+        console.warn("Cloud pull failed or timed out. Retrying next cycle.", e);
+    } finally {
+        isSyncing = false;
     }
 }
 
@@ -264,7 +261,6 @@ async function pushStudentsToCloud() {
 let lastDataPushTime = 0;
 
 async function pushLogsToCloud() {
-    // 1. Lock the pull engine immediately for 10 seconds
     lastDataPushTime = Date.now(); 
 
     const studentsData = localStorage.getItem('students') || "[]";
@@ -272,6 +268,10 @@ async function pushLogsToCloud() {
     const configData = localStorage.getItem('sys_config') || '{"locked":false,"regOpen":false}';
     
     try {
+        const controller = new AbortController();
+        // 🟢 INCREASED TIMEOUT: Gives Render DB 25 seconds to respond before failing
+        const timeoutId = setTimeout(() => controller.abort(), 25000); 
+
         const response = await fetch(`${API_BASE_URL}/sync/push`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -279,14 +279,15 @@ async function pushLogsToCloud() {
                 students: studentsData,
                 logs: logsData,
                 config: configData
-            })
+            }),
+            signal: controller.signal
         });
         
-        if (response.ok) {
-            console.log("Cloud sync successful.");
-        }
+        clearTimeout(timeoutId);
+
+        if (!response.ok) throw new Error("Server rejected push.");
     } catch (e) {
-        console.error("Cloud push failed.", e);
+        console.warn("Cloud push error:", e.message);
     }
 }
 
@@ -1071,15 +1072,14 @@ async function logAttendanceAction(student, action, endOfShiftDetails = null, ov
         logs = logs.filter(l => !(l.id === 'SYS_DELETED_DATE' && l.date === dateStr));
     }
 
-    // 🟢 STRICT METHOD: Prepare data but DO NOT save locally yet
     const tempLogs = [...logs, newLog];
     const studentsData = localStorage.getItem('students') || "[]";
     const logsData = JSON.stringify(tempLogs);
     const configData = localStorage.getItem('sys_config') || '{"locked":false,"regOpen":false}';
 
-    // 🟢 DIRECT BACKEND PUSH
+    // 🟢 INCREASED TIMEOUT: 25 Seconds
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 sec timeout
+    const timeoutId = setTimeout(() => controller.abort(), 25000); 
 
     const response = await fetch(`${API_BASE_URL}/sync/push`, {
         method: 'POST',
@@ -1098,7 +1098,6 @@ async function logAttendanceAction(student, action, endOfShiftDetails = null, ov
         throw new Error("Server rejected the database insertion.");
     }
 
-    // 🟢 ONLY IF DB CONFIRMS: Update the UI
     localStorage.setItem('attendanceLogs', logsData);
     lastDataPushTime = Date.now();
     forceInstantUIRefresh();
@@ -1472,7 +1471,7 @@ async function handleTimeIn() {
         let dots = 0;
         animInterval = setInterval(() => {
             dots = (dots + 1) % 4;
-            btnIn.textContent = "SENDING TO DB" + ".".repeat(dots);
+            btnIn.textContent = "SAVING TO DB" + ".".repeat(dots);
         }, 500);
     }
 
@@ -1486,6 +1485,7 @@ async function handleTimeIn() {
     };
 
     try {
+        // Force a pull to ensure we aren't duplicating data
         await pullFromCloud();
 
         const idInput = document.getElementById('student-id-input'); 
@@ -1503,24 +1503,9 @@ async function handleTimeIn() {
 
         const timeWindow = getCurrentTimeWindow();
 
-        if (timeWindow === "TOO_EARLY") {
-            messageEl.textContent = "Shift has not started yet. Time In opens at 5:00 AM.";
-            messageEl.className = "message error";
-            stopAnim(); 
-            return;
-        }
-        if (timeWindow === "LOCKOUT") {
-            messageEl.textContent = "System Locked (12:01 PM - 4:59 PM). If you missed Time In, you are marked Absent.";
-            messageEl.className = "message error";
-            stopAnim(); 
-            return;
-        }
-        if (timeWindow === "TIME_OUT_NORMAL" || timeWindow === "TIME_OUT_LATE") {
-            messageEl.textContent = "Time In is closed for this shift. It is currently the Time Out period.";
-            messageEl.className = "message error";
-            stopAnim(); 
-            return;
-        }
+        if (timeWindow === "TOO_EARLY") { messageEl.textContent = "Shift has not started yet. Time In opens at 5:00 AM."; messageEl.className = "message error"; stopAnim(); return; }
+        if (timeWindow === "LOCKOUT") { messageEl.textContent = "System Locked (12:01 PM - 4:59 PM). If you missed Time In, you are marked Absent."; messageEl.className = "message error"; stopAnim(); return; }
+        if (timeWindow === "TIME_OUT_NORMAL" || timeWindow === "TIME_OUT_LATE") { messageEl.textContent = "Time In is closed for this shift. It is currently the Time Out period."; messageEl.className = "message error"; stopAnim(); return; }
 
         let actionStr = "Time In";
         if (timeWindow === "TIME_IN_LATE") actionStr = "Time In (Late)";
@@ -1545,12 +1530,7 @@ async function handleTimeIn() {
             return;
         }
 
-        const alreadyTimedIn = logs.some(l => 
-            String(l.id).toLowerCase() === studentId.toLowerCase() && 
-            l.date === shift.dateStr && 
-            l.action.includes('Time In')
-        );
-
+        const alreadyTimedIn = logs.some(l => String(l.id).toLowerCase() === studentId.toLowerCase() && l.date === shift.dateStr && l.action.includes('Time In'));
         if (alreadyTimedIn) {
             messageEl.textContent = "You have already timed in for this shift.";
             messageEl.className = "message error";
@@ -1567,15 +1547,14 @@ async function handleTimeIn() {
             details: null
         };
 
-        // 🟢 STRICT METHOD: Prepare data but DO NOT save locally yet
         const tempLogs = [...logs, newLog];
         const studentsData = localStorage.getItem('students') || "[]";
         const logsData = JSON.stringify(tempLogs);
         const configData = localStorage.getItem('sys_config') || '{"locked":false,"regOpen":false}';
 
-        // 🟢 DIRECT BACKEND PUSH: Connect directly to DB
+        // 🟢 INCREASED TIMEOUT: 25 Seconds before throwing an error
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 sec timeout
+        const timeoutId = setTimeout(() => controller.abort(), 25000); 
 
         const response = await fetch(`${API_BASE_URL}/sync/push`, {
             method: 'POST',
@@ -1594,7 +1573,7 @@ async function handleTimeIn() {
             throw new Error("Server rejected the database insertion.");
         }
 
-        // 🟢 ONLY IF DB CONFIRMS: Update the UI and save to memory
+        // 🟢 ONLY IF DB CONFIRMS
         localStorage.setItem('attendanceLogs', logsData);
         localStorage.setItem('activeDeviceStudent', student.id);
         lastDataPushTime = Date.now();
@@ -1611,7 +1590,6 @@ async function handleTimeIn() {
         console.error(error);
         const messageEl = document.getElementById('student-message');
         if (messageEl) {
-            // 🔴 If it fails, it rejects the Time In entirely
             messageEl.textContent = "Network Error: Could not reach the Database. Time In was NOT saved.";
             messageEl.className = "message error";
         }
