@@ -4655,7 +4655,6 @@ function toggleInactivityTracker() {
         }
     } else {
         const shift = getShiftDateDetails();
-        // Start tracking from today
         localStorage.setItem('inactivity_tracker', JSON.stringify({ active: true, startDate: shift.nowObj }));
         renderDashboardSummary();
         forceInstantUIRefresh();
@@ -4664,15 +4663,13 @@ function toggleInactivityTracker() {
 
 let serverStatusCheckTimer = null;
 let serverTextCycleTimer = null;
-let isServerKnownAwake = false; // 🟢 NEW: Remembers if the server is already awake
+let isServerKnownAwake = false; 
 
 function checkServerStatus() {
-    // Admin Elements
     const adminDot = document.getElementById('server-status-dot');
     const adminText = document.getElementById('server-status-text');
     const loginBtn = document.querySelector('#admin-login-view .btn-primary');
     
-    // Student Elements
     const studentDot = document.getElementById('student-server-dot');
     const studentText = document.getElementById('student-server-text');
     const btnIn = document.querySelector('.btn-in');
@@ -4681,7 +4678,7 @@ function checkServerStatus() {
     clearInterval(serverStatusCheckTimer);
     clearInterval(serverTextCycleTimer);
 
-    // 🟢 NEW: Helper function to instantly unlock and set the UI to Ready
+    // Helper function to instantly unlock and set the UI to Ready
     const setReadyUI = () => {
         if (adminDot) { adminDot.style.backgroundColor = 'var(--success)'; adminDot.style.animation = 'none'; }
         if (studentDot) { studentDot.style.backgroundColor = 'var(--success)'; studentDot.style.animation = 'none'; }
@@ -4689,15 +4686,27 @@ function checkServerStatus() {
         if (studentText) { studentText.style.color = 'var(--success)'; studentText.textContent = 'Ready for Attendance'; }
         
         if (loginBtn) { loginBtn.disabled = false; loginBtn.style.opacity = '1'; loginBtn.textContent = 'Login'; }
+        
         if (btnIn) { btnIn.textContent = 'Time In'; }
         if (btnOut) { btnOut.textContent = 'Time Out'; }
         
-        applySystemConfig(); // Lets the normal config decide if buttons should be clickable
+        applySystemConfig(); 
     };
 
-    // 🟢 NEW: If we already woke the server up, skip the animation and instantly unlock!
     if (isServerKnownAwake) {
-        setReadyUI();
+
+        fetch(`${API_BASE_URL}/config/status`, { cache: 'no-store' })
+            .then(res => res.json())
+            .then(data => {
+                let config;
+                try { config = JSON.parse(localStorage.getItem('sys_config') || '{"locked":false,"regOpen":false}'); } 
+                catch(e) { config = { locked: false, regOpen: false }; }
+                
+                config.locked = data.isLocked; // Sync local storage to true database state
+                localStorage.setItem('sys_config', JSON.stringify(config));
+                isBackendLocked = data.isLocked;
+                setReadyUI();
+            }).catch(() => setReadyUI());
         return; 
     }
     
@@ -4716,8 +4725,9 @@ function checkServerStatus() {
         if (studentText) { studentText.style.color = '#f59e0b'; studentText.textContent = bootMessages[msgIndex]; }
         
         if (loginBtn) { loginBtn.disabled = true; loginBtn.style.opacity = '0.4'; loginBtn.textContent = 'WAKING SERVER...'; }
-        if (btnIn) { btnIn.disabled = true; btnIn.style.opacity = '0.4'; btnIn.textContent = 'WAIT...'; }
-        if (btnOut) { btnOut.disabled = true; btnOut.style.opacity = '0.4'; btnOut.textContent = 'WAIT...'; }
+        
+        if (btnIn) { btnIn.disabled = true; btnIn.style.opacity = '0.4'; btnIn.style.cursor = 'not-allowed'; btnIn.textContent = 'WAIT...'; }
+        if (btnOut) { btnOut.disabled = true; btnOut.style.opacity = '0.4'; btnOut.style.cursor = 'not-allowed'; btnOut.textContent = 'WAIT...'; }
     };
 
     setWakingUI();
@@ -4730,7 +4740,6 @@ function checkServerStatus() {
 
     const pingBackend = async () => {
         try {
-            // Adds a quick 4-second timeout so pings don't stack up forever
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 4000);
 
@@ -4744,8 +4753,19 @@ function checkServerStatus() {
             if (res.ok) { 
                 clearInterval(serverTextCycleTimer);
                 clearInterval(serverStatusCheckTimer);
-                isServerKnownAwake = true; // 🟢 Cache the awake state!
-                setReadyUI();
+                isServerKnownAwake = true; 
+                
+                const statusData = await res.json();
+                
+                let config;
+                try { config = JSON.parse(localStorage.getItem('sys_config') || '{"locked":false,"regOpen":false}'); } 
+                catch(e) { config = { locked: false, regOpen: false }; }
+                
+                config.locked = statusData.isLocked; 
+                localStorage.setItem('sys_config', JSON.stringify(config));
+                isBackendLocked = statusData.isLocked;
+                
+                setReadyUI(); 
             }
         } catch (error) {
             console.log("Server still waking up...");
@@ -4753,7 +4773,7 @@ function checkServerStatus() {
     };
 
     pingBackend(); 
-    serverStatusCheckTimer = setInterval(pingBackend, 5000); // Ping every 5 seconds until awake
+    serverStatusCheckTimer = setInterval(pingBackend, 5000); 
 }
 
 let selectedPerfStudentId = null;
