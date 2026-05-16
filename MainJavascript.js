@@ -1477,6 +1477,8 @@ async function factoryReset() {
 }
 
 async function handleTimeIn() {
+    if (typeof isServerKnownAwake !== 'undefined' && !isServerKnownAwake) return;
+
     const btnIn = document.querySelector('.btn-in');
     let animInterval;
 
@@ -3990,11 +3992,23 @@ function applySystemConfig() {
         adminLiveLockOverlay.style.display = config.locked ? 'flex' : 'none';
     }
 
+    // 🟢 THE FIX: Check if the server is still waking up before unlocking!
+    const isServerStillSleeping = (typeof isServerKnownAwake !== 'undefined' && !isServerKnownAwake);
+
     document.querySelectorAll('.btn-in, .btn-out').forEach(btn => {
         if(!btn.getAttribute('onclick') || (!btn.getAttribute('onclick').includes('Modal') && !btn.getAttribute('onclick').includes('togglePortal'))) {
-            btn.disabled = config.locked;
-            btn.style.opacity = config.locked ? '0.5' : '1';
-            btn.style.cursor = config.locked ? 'not-allowed' : 'pointer';
+            
+            if (isServerStillSleeping) {
+                // Force lock if server is dead/waking, overriding Admin config
+                btn.disabled = true;
+                btn.style.opacity = '0.4';
+                btn.style.cursor = 'not-allowed';
+            } else {
+                // Normal behavior controlled by Admin Settings
+                btn.disabled = config.locked;
+                btn.style.opacity = config.locked ? '0.5' : '1';
+                btn.style.cursor = config.locked ? 'not-allowed' : 'pointer';
+            }
         }
     });
 }
@@ -4297,6 +4311,8 @@ function viewHistoryDetails(studentId, historyDateStr) {
 }
 
 async function handleTimeOut() {
+    if (typeof isServerKnownAwake !== 'undefined' && !isServerKnownAwake) return;
+    
     const btnOut = document.querySelector('.btn-out');
     let animInterval;
     
