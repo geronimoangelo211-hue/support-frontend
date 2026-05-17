@@ -4311,14 +4311,11 @@ function viewHistoryDetails(studentId, historyDateStr) {
 }
 
 async function handleTimeOut() {
-    if (typeof isServerKnownAwake !== 'undefined' && !isServerKnownAwake) return;
-    
     const btnOut = document.querySelector('.btn-out');
     let animInterval;
-    
-    // --- 1. Lock Button & Animate ---
+
     if (btnOut) {
-        if (btnOut.disabled) return; 
+        if (btnOut.disabled) return;
         btnOut.disabled = true;
         btnOut.style.opacity = "0.8";
         let dots = 0;
@@ -4328,7 +4325,6 @@ async function handleTimeOut() {
         }, 500);
     }
 
-    // Helper function to explicitly unlock the button
     const stopAnim = () => {
         if (btnOut) {
             clearInterval(animInterval);
@@ -4347,27 +4343,12 @@ async function handleTimeOut() {
         if (!idInput || !messageEl) { stopAnim(); return; }
         const studentId = idInput.value.trim();
 
-        if (!studentId) {
-            messageEl.textContent = "Please enter your Student ID Number.";
-            messageEl.className = "message error";
-            stopAnim(); // 🟢 INSTANT UNLOCK
-            return;
-        }
+        if (!studentId) { messageEl.textContent = "Please enter your Student ID Number."; messageEl.className = "message error"; stopAnim(); return; }
 
         const timeWindow = getCurrentTimeWindow();
 
-        if (timeWindow === "LOCKOUT") {
-            messageEl.textContent = "System Locked (12:01 PM - 4:59 PM). Time Out opens at 5:00 PM.";
-            messageEl.className = "message error";
-            stopAnim(); // 🟢 INSTANT UNLOCK
-            return;
-        }
-        if (timeWindow === "TIME_IN_NORMAL" || timeWindow === "TIME_IN_LATE" || timeWindow === "TOO_EARLY") {
-            messageEl.textContent = "It is too early to Time Out. Time Out opens at 5:00 PM.";
-            messageEl.className = "message error";
-            stopAnim(); // 🟢 INSTANT UNLOCK
-            return;
-        }
+        if (timeWindow === "LOCKOUT") { messageEl.textContent = "System Locked (12:01 PM - 4:59 PM). Time Out opens at 5:00 PM."; messageEl.className = "message error"; stopAnim(); return; }
+        if (timeWindow === "TIME_IN_NORMAL" || timeWindow === "TIME_IN_LATE" || timeWindow === "TOO_EARLY") { messageEl.textContent = "It is too early to Time Out. Time Out opens at 5:00 PM."; messageEl.className = "message error"; stopAnim(); return; }
 
         let actionStr = "Time Out";
         if (timeWindow === "TIME_OUT_LATE") actionStr = "Time Out (Late)";
@@ -4378,88 +4359,108 @@ async function handleTimeOut() {
 
         const student = students.find(s => String(s.id).toLowerCase() === studentId.toLowerCase());
         
-        if (!student) {
-            messageEl.textContent = "Student ID not found. Please register first.";
-            messageEl.className = "message error";
-            stopAnim(); // 🟢 INSTANT UNLOCK
-            return;
-        }
-
-        if (!student.assignedDays || !student.assignedDays.includes(shift.dayStr)) {
-            messageEl.textContent = `You are not scheduled for duty today (${shift.dayStr}).`;
-            messageEl.className = "message error";
-            stopAnim(); // 🟢 INSTANT UNLOCK
-            return;
-        }
+        if (!student) { messageEl.textContent = "Student ID not found. Please register first."; messageEl.className = "message error"; stopAnim(); return; }
+        if (!student.assignedDays || !student.assignedDays.includes(shift.dayStr)) { messageEl.textContent = `You are not scheduled for duty today (${shift.dayStr}).`; messageEl.className = "message error"; stopAnim(); return; }
 
         const hasTimedIn = logs.some(l => String(l.id).toLowerCase() === studentId.toLowerCase() && l.date === shift.dateStr && l.action.includes('Time In'));
-        if (!hasTimedIn) {
-            messageEl.textContent = "You cannot Time Out because you have no Time In record for today.";
-            messageEl.className = "message error";
-            stopAnim(); // 🟢 INSTANT UNLOCK
-            return;
-        }
+        if (!hasTimedIn) { messageEl.textContent = "You cannot Time Out because you have no Time In record for today."; messageEl.className = "message error"; stopAnim(); return; }
 
         const alreadyTimedOut = logs.some(l => String(l.id).toLowerCase() === studentId.toLowerCase() && l.date === shift.dateStr && l.action.includes('Time Out'));
-        if (alreadyTimedOut) {
-            messageEl.textContent = "You have already timed out for this shift.";
-            messageEl.className = "message error";
-            stopAnim(); // 🟢 INSTANT UNLOCK
-            return;
-        }
+        if (alreadyTimedOut) { messageEl.textContent = "You have already timed out for this shift."; messageEl.className = "message error"; stopAnim(); return; }
 
-        // Validation passed! Stop checking animation before opening modal.
+        // Stop the front button animation, moving to modal phase
         stopAnim();
 
-        // --- Open Modal and wait for user ---
+        // 🟢 SHOW MODAL AND GET DATA
         const reportData = await askForShiftReport(student.gcHandle, student.name);
-        if (!reportData) return; // User clicked cancel
+        if (!reportData) return; // User clicked cancel on the modal
 
-        try {
-            const newLog = {
-                name: student.name,
-                id: student.id,
-                action: actionStr,
-                time: shift.realTimeStr,
-                date: shift.dateStr,
-                details: {
-                    gcHandle: reportData.gc,
-                    announcement: reportData.ann,
-                    whoPosted: reportData.name
-                } 
-            };
+        // Now we process the DB push. The modal is still open, saying "Submitting..."
+        const newLog = {
+            name: student.name,
+            id: student.id,
+            action: actionStr,
+            time: shift.realTimeStr,
+            date: shift.dateStr,
+            details: {
+                gcHandle: reportData.gc,
+                announcement: reportData.ann,
+                whoPosted: reportData.name
+            } 
+        };
 
-            logs.push(newLog);
-            localStorage.setItem('attendanceLogs', JSON.stringify(logs));
-            localStorage.removeItem('activeDeviceStudent');
-            
-            try {
-                await pushLogsToCloud();
-                await new Promise(resolve => setTimeout(resolve, 1000));
-            } catch (e) {
-                console.error("Cloud push failed:", e);
-            }
-            
-            checkDeviceLock(); 
-            messageEl.textContent = `Success: Shift Report submitted and Time Out recorded!`;
-            messageEl.className = "message success";
-            idInput.value = ''; 
+        const tempLogs = [...logs, newLog];
+        const studentsData = localStorage.getItem('students') || "[]";
+        const logsData = JSON.stringify(tempLogs);
+        const configData = localStorage.getItem('sys_config') || '{"locked":false,"regOpen":false}';
 
-            try {
-                if (typeof renderAttendanceLogs === 'function') renderAttendanceLogs();
-                if (typeof renderDashboardSummary === 'function') renderDashboardSummary();
-                if (typeof renderAttendanceSummary === 'function') renderAttendanceSummary();
-            } catch(e) {}
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 20000); 
 
-        } finally {
-            // The master kill switch for the modal overlay
-            const modal = document.getElementById('shift-report-modal');
-            if (modal) modal.remove();
+        // 1. PUSH DIRECTLY TO DATABASE
+        const response = await fetch(`${API_BASE_URL}/sync/push`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ students: studentsData, logs: logsData, config: configData }),
+            signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+        if (!response.ok) throw new Error("Server rejected the database insertion.");
+
+        // 🟢 2. THE DOUBLE CHECK (Verification)
+        const submitBtn = document.getElementById('rep-submit');
+        if (submitBtn) submitBtn.textContent = "VERIFYING DB..."; // Changes text inside modal
+        
+        const verifyRes = await fetch(`${API_BASE_URL}/sync/pull?t=${Date.now()}`, {
+            cache: 'no-store',
+            headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
+        });
+
+        if (!verifyRes.ok) throw new Error("Could not verify database entry.");
+        
+        const verifyData = await verifyRes.json();
+        const serverLogs = JSON.parse(verifyData.logs || "[]");
+
+        // Physically check the database to confirm it saved
+        const isActuallySaved = serverLogs.some(l => 
+            String(l.id) === String(student.id) && 
+            l.date === shift.dateStr && 
+            l.action === actionStr
+        );
+
+        if (!isActuallySaved) {
+            throw new Error("Verification failed: Database dropped the data.");
         }
+
+        // 🟢 3. SUCCESS: Update UI and clear locks
+        localStorage.setItem('attendanceLogs', verifyData.logs); // Overwrite with true DB data
+        localStorage.removeItem('activeDeviceStudent'); // 🟢 THIS REMOVES THE DEVICE LOCK!
+        lastDataPushTime = Date.now();
+        
+        // 🟢 PROFESSIONAL SUCCESS MESSAGE
+        messageEl.textContent = `Success: ${student.name} - ${actionStr} at ${shift.realTimeStr}`;
+        messageEl.className = "message success";
+        idInput.value = ''; 
+
+        const modal = document.getElementById('shift-report-modal');
+        if (modal) modal.remove(); // Destroy modal so they can see the success text
+
+        checkDeviceLock(); // Refreshes the UI to officially hide the yellow lock box
+        forceInstantUIRefresh();
 
     } catch (error) {
         console.error(error);
-        stopAnim(); // 🟢 Failsafe Unlock
+        const submitBtn = document.getElementById('rep-submit');
+        if (submitBtn) {
+            submitBtn.textContent = "Submit"; // Reset modal button so they can try again
+            submitBtn.disabled = false;
+            submitBtn.style.opacity = "1";
+        }
+        const cancelBtn = document.getElementById('rep-cancel');
+        if (cancelBtn) cancelBtn.style.display = "block";
+
+        alert("Network Error: Could not verify Time Out in the Database. Please click Submit again.");
     }
 }
 
