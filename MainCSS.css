@@ -46,6 +46,8 @@ body {
     transition: background 0.5s ease;
 }
 
+
+
 body.portal-mode {
     background: linear-gradient(135deg, 
         #0d1117 0%, 
@@ -149,26 +151,29 @@ input:focus, select:focus {
     background-color: #16181d;
 }
 
-.view { display: none; flex: 1; height: calc(100% - var(--nav-height)); padding: 30px; }
-.view.active { display: flex; justify-content: center; align-items: center; }
+.view { display: none; flex: 1; height: calc(100% - var(--nav-height)); padding: 30px; overflow-y: auto; }
+.view.active { display: flex; justify-content: center; align-items: center; } /* 🟢 Revert to perfect center */
+
+#student-view { overflow: hidden !important; padding: 10px; }
+
+
 
 .portal-wrapper {
     position: relative;
     width: 95%;            
-    max-width: 450px;      
-    margin: auto;          
+    max-width: 420px; /* Slightly tighter width */
+    margin: 0 auto; /* Let flexbox handle vertical centering */
+    margin-top: clamp(60px, 12vh, 100px); /* 🟢 Adaptive space just for the mascot */
     z-index: 1;            
     height: auto;          
 }
 
 .portal-mascot {
     position: absolute;
-    top: -20%; 
-    left: 27%; 
-    
-    transform: translate(-50%, calc(-100% + 35px)); 
-    
-    height: clamp(110px, 25vw, 160px);
+    top: -15%; 
+    left: 35%; 
+    transform: translate(-50%, -90%); 
+    height: clamp(60px, 14vh, 130px); 
     z-index: -1;
     animation: floatIn 0.5s ease-out forwards;
 }
@@ -698,6 +703,10 @@ input[type="checkbox"] {
         height: 100vh;
     }
 
+    .view {
+        padding: 15px; 
+    }
+
     .desktop-header {
         display: none !important;
     }
@@ -881,7 +890,7 @@ th {
 
 .live-spinner {
     border: 3px solid rgba(0, 0, 0, 0.1);
-    border-top: 3px solid var(--primary); /* Uses your system's primary color */
+    border-top: 3px solid var(--primary); 
     border-radius: 50%;
     width: 20px;
     height: 20px;
@@ -891,7 +900,6 @@ th {
     margin-left: 12px;
 }
 
-/* If you don't already have the spin animation defined from earlier: */
 @keyframes spin { 
     0% { transform: rotate(0deg); } 
     100% { transform: rotate(360deg); } 
@@ -901,4 +909,47 @@ th {
     0% { transform: scale(0.90); opacity: 0.7; }
     50% { transform: scale(1.1); opacity: 1; }
     100% { transform: scale(0.90); opacity: 0.7; }
+}
+
+@media (max-height: 850px) {
+    #student-view {
+        padding: 5px; 
+    }
+    .portal-wrapper {
+        margin-top: 65px; 
+        margin-bottom: 5px;
+    }
+    .portal-mascot {
+        height: clamp(60px, 12vh, 90px); 
+        transform: translate(-50%, -75%);
+    }
+    .centered-panel { 
+        padding: 15px 25px; 
+    }
+    .centered-panel h2 { 
+        font-size: 1.4rem; 
+        margin-bottom: 5px; 
+    }
+    .centered-panel p { 
+        margin-bottom: 12px; 
+        font-size: 0.9rem; 
+    }
+    .slider-captcha-wrapper { 
+        margin: 10px 0; 
+    }
+    input { 
+        padding: 10px 12px; 
+        margin: 6px 0; 
+    }
+    .action-buttons { 
+        margin-top: 15px; 
+        gap: 12px; 
+    }
+    .action-buttons button { 
+        padding: 12px; 
+        font-size: 1rem; 
+    }
+    #student-message {
+        margin-top: 10px;
+    }
 }
