@@ -799,12 +799,16 @@ async function createStudent() {
         if (otherInput) gcHandle = otherInput.value.trim();
     }
 
-    await safeDatabaseUpdate("New Student", () => {
+    try {
+        await pullFromCloud();
         let students = JSON.parse(localStorage.getItem('students')) || [];
         if (students.find(s => String(s.id) === idInput)) {
-            msg.textContent = "Student ID already exists!"; msg.className = "message error"; return false;
+            msg.textContent = "Student ID already exists!"; msg.className = "message error";
+            return;
         }
         students.push({ name: nameInput, id: idInput, classLevel: classLvl, gcHandle: gcHandle, assignedDays: selectedDays });
+        
+        await pushStudentsToCloud(students);
         localStorage.setItem('students', JSON.stringify(students));
         
         msg.textContent = "Student Support added successfully!"; msg.className = "message success";
@@ -813,7 +817,8 @@ async function createStudent() {
         document.getElementById('new-student-class').value = '';
         document.getElementById('new-student-gc').value = '';
         document.querySelectorAll('.new-stu-day').forEach(cb => cb.checked = false);
-    });
+        forceInstantUIRefresh();
+    } catch(e) { alert("Failed to add student to database."); }
 }
 
 async function removeStudent(idNum) {
@@ -844,20 +849,25 @@ async function updateStudentGC() {
 
     if (!idNum) { showMessage('edit-gc-message', 'Please enter a Student ID.', 'error'); return; }
 
-    await safeDatabaseUpdate("GC Handle Update", () => {
-        const students = JSON.parse(localStorage.getItem('students')) || [];
+    try {
+        await pullFromCloud();
+        let students = JSON.parse(localStorage.getItem('students')) || [];
         const studentIndex = students.findIndex(s => String(s.id) === String(idNum));
 
         if (studentIndex === -1) {
-            showMessage('edit-gc-message', 'Student ID not found!', 'error'); return false;
+            showMessage('edit-gc-message', 'Student ID not found!', 'error');
+            return;
         }
         students[studentIndex].gcHandle = newGc;
+        
+        await pushStudentsToCloud(students);
         localStorage.setItem('students', JSON.stringify(students));
-    });
-
-    document.getElementById('edit-student-id').value = '';
-    document.getElementById('edit-student-gc').value = '';
-    showMessage('edit-gc-message', 'GC Handle updated globally!', 'success');
+        
+        document.getElementById('edit-student-id').value = '';
+        document.getElementById('edit-student-gc').value = '';
+        showMessage('edit-gc-message', 'GC Handle updated globally!', 'success');
+        forceInstantUIRefresh();
+    } catch(e) { alert("Error connecting to database."); }
 }
 
 function openEditStudentModal(id) {
@@ -919,12 +929,14 @@ async function saveStudentEdit() {
 
     if (!newName || !newId) { alert("Name and ID cannot be empty."); return; }
 
-    await safeDatabaseUpdate("Student Edit", () => {
+    try {
+        await pullFromCloud();
         let students = JSON.parse(localStorage.getItem('students')) || [];
         let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
 
         if (origId !== newId && students.some(s => String(s.id) === newId)) {
-            alert("This Student ID is already in use by another student."); return false;
+            alert("This Student ID is already in use by another student.");
+            return;
         }
 
         const studentIndex = students.findIndex(s => String(s.id) === origId);
@@ -936,37 +948,50 @@ async function saveStudentEdit() {
         }
 
         logs.forEach(l => { if (String(l.id) === origId) { l.id = newId; l.name = newName; } });
+        
+        await pushStudentsToCloud(students);
+        await pushLogsToCloudFallback(logs); 
+        
         localStorage.setItem('students', JSON.stringify(students));
         localStorage.setItem('attendanceLogs', JSON.stringify(logs));
-    });
-    closeEditStudentModal();
+        closeEditStudentModal();
+        forceInstantUIRefresh();
+    } catch(e) { alert("Failed to save changes."); }
 }
 
 async function deleteStudent(idNum) {
     if(!isAuthenticated()) return;
-    if (!confirm(`Are you sure you want to permanently delete student ID ${idNum}?`)) return;
+    if (!confirm("Are you sure you want to permanently delete this student?")) return;
 
-    await safeDatabaseUpdate("Delete Student", () => {
+    try {
+        await pullFromCloud();
         let students = JSON.parse(localStorage.getItem('students')) || [];
         students = students.filter(s => String(s.id) !== String(idNum));
-        localStorage.setItem('students', JSON.stringify(students));
-
+        
         let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
         logs = logs.filter(l => String(l.id) !== String(idNum));
+        
+        await pushStudentsToCloud(students);
+        await pushLogsToCloudFallback(logs);
+        
+        localStorage.setItem('students', JSON.stringify(students));
         localStorage.setItem('attendanceLogs', JSON.stringify(logs));
-    });
+        forceInstantUIRefresh();
+    } catch(e) { alert("Failed to delete student."); }
 }
 
 async function toggleAssignedDay(studentId, dayStr, btnElement) {
     if(!isAuthenticated()) return;
 
-    await safeDatabaseUpdate("Schedule Update", () => {
+    try {
+        await pullFromCloud();
         let students = JSON.parse(localStorage.getItem('students')) || [];
         const studentIndex = students.findIndex(s => String(s.id) === String(studentId));
         
         if (studentIndex > -1) {
             if (!students[studentIndex].assignedDays) students[studentIndex].assignedDays = [];
             const hasDay = students[studentIndex].assignedDays.includes(dayStr);
+            
             if (hasDay) {
                 students[studentIndex].assignedDays = students[studentIndex].assignedDays.filter(d => d !== dayStr);
                 btnElement.classList.remove('active');
@@ -974,9 +999,11 @@ async function toggleAssignedDay(studentId, dayStr, btnElement) {
                 students[studentIndex].assignedDays.push(dayStr);
                 btnElement.classList.add('active');
             }
+            await pushStudentsToCloud(students);
             localStorage.setItem('students', JSON.stringify(students));
+            forceInstantUIRefresh();
         }
-    });
+    } catch(e) { alert("Schedule update failed."); }
 }
 
 async function logAttendanceAction(student, action, endOfShiftDetails = null, overrideDateStr = null) {
@@ -1054,11 +1081,14 @@ async function deleteLog(idNum, dateStr) {
     if (!idNum || !dateStr) return;
     if (!confirm("Are you sure you want to delete this attendance record?")) return;
 
-    await safeDatabaseUpdate("Delete Log", () => {
+    try {
+        await pullFromCloud();
         let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
         logs = logs.filter(l => !(String(l.id).trim() === String(idNum).trim() && String(l.date).trim() === String(dateStr).trim()));
+        await pushLogsToCloudFallback(logs);
         localStorage.setItem('attendanceLogs', JSON.stringify(logs));
-    });
+        forceInstantUIRefresh();
+    } catch(e) { alert("Failed to delete log."); }
 }
 
 async function deleteHistoryDate(dateStr, event) {
@@ -1066,17 +1096,20 @@ async function deleteHistoryDate(dateStr, event) {
     if (event) event.stopPropagation(); 
     
     if(confirm(`⚠️ WARNING ⚠️\n\nAre you sure you want to completely delete ALL attendance logs for ${dateStr}?\n\nThis will permanently remove this day from the students' Performance Stats.`)) {
-        await safeDatabaseUpdate("Delete Date", () => {
+        try {
+            await pullFromCloud();
             let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
             logs = logs.filter(l => l.date !== dateStr);
             logs.push({ name: 'SYSTEM_DELETED', id: 'SYS_DELETED_DATE', action: 'DELETED', time: '00:00 AM', date: dateStr, details: null });
+            await pushLogsToCloudFallback(logs);
             localStorage.setItem('attendanceLogs', JSON.stringify(logs));
-        });
-        
-        const titleEl = document.getElementById('history-table-title');
-        if (titleEl && titleEl.textContent.includes(dateStr)) {
-            document.getElementById('history-table-container').style.display = 'none';
-        }
+            
+            const titleEl = document.getElementById('history-table-title');
+            if (titleEl && titleEl.textContent.includes(dateStr)) {
+                document.getElementById('history-table-container').style.display = 'none';
+            }
+            forceInstantUIRefresh();
+        } catch(e) { alert("Failed to delete date."); }
     }
 }
 
@@ -1105,7 +1138,8 @@ function closeExemptModal() {
 async function applyExempt(type) {
     if(!isAuthenticated()) return;
 
-    await safeDatabaseUpdate("Exemption", () => {
+    try {
+        await pullFromCloud();
         let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
         const students = JSON.parse(localStorage.getItem('students')) || [];
         const s = students.find(x => String(x.id) === String(pendingExemptId));
@@ -1122,26 +1156,31 @@ async function applyExempt(type) {
                 logs = logs.filter(l => !(String(l.id) === String(pendingExemptId) && l.date === pendingExemptDate && l.action.includes('Time Out')));
                 logs.push({ name: s.name, id: s.id, action: 'Time Out (Exempted)', time: 'Exempted', date: pendingExemptDate, details: { gcHandle: '-', announcement: '-', whoPosted: '-' }, originalLog: existingOutLog || null });
             }
+            await pushLogsToCloudFallback(logs);
             localStorage.setItem('attendanceLogs', JSON.stringify(logs));
         }
-    });
 
-    const modal = document.getElementById('exempt-modal');
-    if (modal) modal.style.display = 'none';
-    pendingExemptId = null; pendingExemptDate = null; pendingExemptCheckbox = null;
+        const modal = document.getElementById('exempt-modal');
+        if (modal) modal.style.display = 'none';
+        pendingExemptId = null; pendingExemptDate = null; pendingExemptCheckbox = null;
+        forceInstantUIRefresh();
+    } catch(e) { alert("Failed to save exemption."); }
 }
 
 async function removeExemptions(idNum, dateStr) {
     if(!isAuthenticated()) return;
 
-    await safeDatabaseUpdate("Remove Exemption", () => {
+    try {
+        await pullFromCloud();
         let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
         const exemptLogs = logs.filter(l => String(l.id) === String(idNum) && l.date === dateStr && l.action.includes('Exempted'));
         logs = logs.filter(l => !(String(l.id) === String(idNum) && l.date === dateStr && l.action.includes('Exempted')));
         
         exemptLogs.forEach(el => { if (el.originalLog) logs.push(el.originalLog); });
+        await pushLogsToCloudFallback(logs);
         localStorage.setItem('attendanceLogs', JSON.stringify(logs));
-    });
+        forceInstantUIRefresh();
+    } catch(e) { alert("Failed to remove exemption."); }
 }
 
 async function exemptAllForDate(dateStr) {
@@ -1149,7 +1188,8 @@ async function exemptAllForDate(dateStr) {
     const verificationText = prompt(`⚠️ WARNING ⚠️\n\nThis will mark EVERYONE on ${dateStr} as Exempted.\n\nTo confirm, type exactly:\nExempt Everyone`);
     
     if (verificationText === "Exempt Everyone") {
-        await directDatabaseUpdate("Bulk Exemption", () => {
+        try {
+            await pullFromCloud();
             let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
             const students = JSON.parse(localStorage.getItem('students')) || [];
             const targetDateObj = new Date(dateStr);
@@ -1167,9 +1207,11 @@ async function exemptAllForDate(dateStr) {
                 logs.push({ name: s.name, id: s.id, action: 'Time In (Exempted)', time: 'Exempted', date: dateStr, details: null, originalLog: existingInLog || null });
                 logs.push({ name: s.name, id: s.id, action: 'Time Out (Exempted)', time: 'Exempted', date: dateStr, details: { gcHandle: '-', announcement: '-', whoPosted: '-' }, originalLog: existingOutLog || null });
             });
+            await pushLogsToCloudFallback(logs);
             localStorage.setItem('attendanceLogs', JSON.stringify(logs));
-        });
-        alert(`Successfully marked everyone as exempted for ${dateStr}!`);
+            forceInstantUIRefresh();
+            alert(`Successfully marked everyone as exempted for ${dateStr}!`);
+        } catch(e) { alert("Bulk Exemption failed."); }
     }
 }
 
@@ -1184,23 +1226,29 @@ async function createManualHistoryDate() {
         if(isNaN(parsed)) throw new Error("");
         dateStr = parsed.toLocaleDateString('en-US'); 
     } catch(e) {
-        alert("Invalid date format. Please use M/D/YYYY (e.g., 5/4/2026)."); return;
+        alert("Invalid date format. Please use M/D/YYYY (e.g., 5/4/2026).");
+        return;
     }
 
-    await safeDatabaseUpdate("New History Card", () => {
+    try {
+        await pullFromCloud();
         let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
         const isTombstoned = logs.some(l => l.id === 'SYS_DELETED_DATE' && l.date === dateStr);
         const hasActualLogs = logs.some(l => l.date === dateStr && l.id !== 'SYS_DELETED_DATE');
 
         if (hasActualLogs && !isTombstoned) {
-            alert("A card for this date already exists."); return false;
+            alert("A card for this date already exists.");
+            return;
         }
 
         logs = logs.filter(l => !(l.id === 'SYS_DELETED_DATE' && l.date === dateStr));
         logs.push({ name: 'SYSTEM_INIT', id: 'SYS_INIT_DATE', action: 'INIT', time: '00:00 AM', date: dateStr, details: null });
+        
+        await pushLogsToCloudFallback(logs);
         localStorage.setItem('attendanceLogs', JSON.stringify(logs));
-    });
-    alert(`Date Card for ${dateStr} created successfully!`);
+        forceInstantUIRefresh();
+        alert(`Date Card for ${dateStr} created successfully!`);
+    } catch(e) { alert("Failed to create date card."); }
 }
 
 async function devClearLogs() {
@@ -3482,6 +3530,7 @@ function closeEditLogModal() {
 
 async function saveEditLogModal() {
     if(!isAuthenticated()) return;
+
     const idNum = document.getElementById('edit-log-id').value;
     const dateStr = document.getElementById('edit-log-date').value;
     const inVal = document.getElementById('edit-log-in').value.trim();
@@ -3495,11 +3544,12 @@ async function saveEditLogModal() {
     if (inVal && !timeRegex.test(inVal)) { alert("Invalid Time In format."); return; }
     if (outVal && !timeRegex.test(outVal)) { alert("Invalid Time Out format."); return; }
 
-    await safeDatabaseUpdate("Log Edit", () => {
+    try {
+        await pullFromCloud();
         let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
         const students = JSON.parse(localStorage.getItem('students')) || [];
         const student = students.find(s => String(s.id) === String(idNum));
-        if (!student) return false;
+        if (!student) { return; }
 
         logs = logs.filter(l => !(String(l.id) === String(idNum) && l.date === dateStr));
 
@@ -3521,9 +3571,11 @@ async function saveEditLogModal() {
                 logs.push({ name: student.name || 'Unknown', id: student.id, action: newAction, time: outVal.toUpperCase(), date: dateStr, details: { gcHandle: gcHandle, announcement: ann, whoPosted: post } });
             }
         }
+        await pushLogsToCloudFallback(logs);
         localStorage.setItem('attendanceLogs', JSON.stringify(logs));
-    });
-    closeEditLogModal();
+        closeEditLogModal();
+        forceInstantUIRefresh();
+    } catch(e) { alert("Failed to save log."); }
 }
 
 async function sendHeartbeat() {
