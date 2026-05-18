@@ -797,32 +797,53 @@ async function pushDataToCloud() {
 
 async function createStudent() {
     if(!isAuthenticated()) return;
+    
     const nameInput = document.getElementById('new-student-name').value.trim();
     const idInput = document.getElementById('new-student-id').value.trim();
     const classLvl = document.getElementById('new-student-class').value;
     let gcHandle = document.getElementById('new-student-gc').value;
     const selectedDays = Array.from(document.querySelectorAll('.new-stu-day:checked')).map(cb => cb.value);
 
-    if (!nameInput || !idInput || !classLvl || !gcHandle) return;
+    // 1. Missing Fields Notification
+    if (!nameInput || !idInput || !classLvl || !gcHandle) {
+        showMessage('admin-message', 'Please fill all fields.', 'error');
+        return;
+    }
+
     if (gcHandle === 'Other') {
         const otherInput = document.getElementById('new-student-gc-other');
         if (otherInput) gcHandle = otherInput.value.trim();
     }
 
-    await pullFromCloud();
-    let students = JSON.parse(localStorage.getItem('students')) || [];
-    if (students.find(s => String(s.id) === idInput)) return;
-    
-    students.push({ name: nameInput, id: idInput, classLevel: classLvl, gcHandle: gcHandle, assignedDays: selectedDays });
-    localStorage.setItem('students', JSON.stringify(students));
-    pushDataToCloud();
-    
-    document.getElementById('new-student-name').value = '';
-    document.getElementById('new-student-id').value = '';
-    document.getElementById('new-student-class').value = '';
-    document.getElementById('new-student-gc').value = '';
-    document.querySelectorAll('.new-stu-day').forEach(cb => cb.checked = false);
-    forceInstantUIRefresh();
+    try {
+        await pullFromCloud();
+        let students = JSON.parse(localStorage.getItem('students')) || [];
+        
+        // 2. Duplicate ID Notification
+        if (students.find(s => String(s.id) === idInput)) {
+            showMessage('admin-message', 'Student ID already exists!', 'error');
+            return;
+        }
+        
+        students.push({ name: nameInput, id: idInput, classLevel: classLvl, gcHandle: gcHandle, assignedDays: selectedDays });
+        
+        await pushStudentsToCloud(students);
+        localStorage.setItem('students', JSON.stringify(students));
+        
+        // 3. Success Notification
+        showMessage('admin-message', 'Successfully created!', 'success');
+        
+        // Clear the form
+        document.getElementById('new-student-name').value = '';
+        document.getElementById('new-student-id').value = '';
+        document.getElementById('new-student-class').value = '';
+        document.getElementById('new-student-gc').value = '';
+        document.querySelectorAll('.new-stu-day').forEach(cb => cb.checked = false);
+        forceInstantUIRefresh();
+        
+    } catch(e) { 
+        showMessage('admin-message', 'Failed to add student to database.', 'error');
+    }
 }
 
 async function saveStudentEdit() {
