@@ -127,20 +127,30 @@ async function checkBackendLockStatus() {
 
 async function toggleAttendanceState(checkbox) {
     if(!isAuthenticated()) return;
+    
     let tk = sessionStorage.getItem('_auth_tkn_x92');
     let userRole = 'ADMIN';
     try { userRole = JSON.parse(atob(tk)).role || 'ADMIN'; } catch(e) {}
     
-    if (userRole === 'VISITOR') { checkbox.checked = !checkbox.checked; alert("Access Denied."); return; }
+    if (userRole === 'VISITOR') {
+        checkbox.checked = !checkbox.checked; // Revert visually
+        alert("Access Denied: Only Support Heads (Admins) can change system settings.");
+        return;
+    }
+
+    await pullFromCloud();
 
     const isLocked = checkbox.checked;
-    await directDatabaseUpdate("System Config", () => {
-        let config;
-        try { config = JSON.parse(localStorage.getItem('sys_config') || '{"locked":false,"regOpen":false}'); } 
-        catch(e) { config = { locked: false, regOpen: false }; }
-        config.locked = isLocked;
-        localStorage.setItem('sys_config', JSON.stringify(config));
-    });
+    let config;
+    try { config = JSON.parse(localStorage.getItem('sys_config') || '{"locked":false,"regOpen":false}'); } 
+    catch(e) { config = { locked: false, regOpen: false }; }
+    
+    config.locked = isLocked;
+    localStorage.setItem('sys_config', JSON.stringify(config));
+    
+    lastDataPushTime = Date.now();
+    applySystemConfig();
+    try { await pushLogsToCloud(); } catch (e) { console.error("Failed to push lock state to cloud"); }
 }
 
 function applyUIRestrictions() {
@@ -171,13 +181,19 @@ window.resolveSync = async function(action) {
     sessionStorage.setItem('sync_action', action);
 
     if (action === 'push') {
-        await directDatabaseUpdate("Ghost Data Restore", () => { return true; });
+        await pushStudentsToCloud();
+        await pushLogsToCloud();
         alert('Cloud restored successfully!');
     } else {
         localStorage.setItem('students', JSON.stringify([]));
         localStorage.setItem('attendanceLogs', JSON.stringify([]));
         localStorage.setItem('deletedDates', JSON.stringify([]));
-        forceInstantUIRefresh();
+        if (document.getElementById('admin-dashboard-view').classList.contains('active')) {
+            renderStudents();
+            renderLogs();
+            renderMainDashboard();
+            renderSchedule();
+        }
         alert('Local ghost data destroyed!');
     }
 }
@@ -187,97 +203,91 @@ let lastConfigPushTime = 0;
 async function pullFromCloud() {
     if (isSyncing) return; 
     isSyncing = true;
+
     try {
-        const response = await fetch(`${API_BASE_URL}/sync/pull?t=${Date.now()}`, { cache: 'no-store' });
+        const timestamp = new Date().getTime();
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 sec for pull
+
+        const response = await fetch(`${API_BASE_URL}/sync/pull?t=${timestamp}`, {
+            cache: 'no-store',
+            headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
+            signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+
         if (response.ok) {
             const data = await response.json();
-            if (data.students && data.students !== "null") localStorage.setItem('students', data.students);
-            if (data.logs && data.logs !== "null") localStorage.setItem('attendanceLogs', data.logs);
+            
+            // 🟢 STRICT DATABASE OVERRIDE: The Database is King. No merging.
+            if (data.students && data.students !== "null") {
+                localStorage.setItem('students', data.students);
+            }
+            if (data.logs && data.logs !== "null") {
+                localStorage.setItem('attendanceLogs', data.logs);
+            }
             if (data.config && data.config !== "{}" && data.config !== "null") {
                 localStorage.setItem('sys_config', data.config);
-                applySystemConfig();
+                applySystemConfig(); 
             }
+
             if (document.getElementById('admin-dashboard-view').classList.contains('active')) {
-                forceInstantUIRefresh();
+                if (typeof renderStudents === 'function') renderStudents();
+                if (typeof renderLogs === 'function') renderLogs();
+                if (typeof renderSchedule === 'function') renderSchedule();
             }
         }
-    } catch (e) {} finally {
+    } catch (e) {
+        console.warn("Cloud pull failed or timed out. Retrying next cycle.", e);
+    } finally {
         isSyncing = false;
     }
 }
 
-async function pushDataToCloud() {
-    lastDataPushTime = Date.now();
-    const studentsData = localStorage.getItem('students') || "[]";
-    const logsData = localStorage.getItem('attendanceLogs') || "[]";
-    const configData = localStorage.getItem('sys_config') || '{"locked":false,"regOpen":false}';
+async function pushStudentsToCloud() {
+    if (!isAuthenticated()) return; 
+    await pushLogsToCloud();
+    const data = JSON.parse(localStorage.getItem('students')) || [];
     try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 15000); 
-        await fetch(`${API_BASE_URL}/sync/push`, {
+        await fetch(`${API_BASE_URL}/students/sync`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ students: studentsData, logs: logsData, config: configData }),
-            signal: controller.signal
+            headers: { 'Content-Type': 'application/json', 'X-Admin-Key': sessionStorage.getItem('adminSessionToken') },
+            body: JSON.stringify(data)
         });
-        clearTimeout(timeoutId);
-    } catch (e) {}
+    } catch (err) {}
 }
 
 let lastDataPushTime = 0;
 
-async function directDatabaseUpdate(actionName, modifierCallback) {
-    showLoadingOverlay(`Syncing ${actionName}...`);
+async function pushLogsToCloud() {
+    lastDataPushTime = Date.now(); 
+
+    const studentsData = localStorage.getItem('students') || "[]";
+    const logsData = localStorage.getItem('attendanceLogs') || "[]";
+    const configData = localStorage.getItem('sys_config') || '{"locked":false,"regOpen":false}';
+    
     try {
-        // 1. FORCE ABSOLUTE LATEST DATA FROM DB FIRST
-        const timestamp = Date.now();
-        const [studentsRes, logsRes, configRes] = await Promise.all([
-            fetch(`${API_BASE_URL}/students?t=${timestamp}`, { cache: 'no-store' }).catch(() => null),
-            fetch(`${API_BASE_URL}/logs?t=${timestamp}`, { cache: 'no-store' }).catch(() => null),
-            fetch(`${API_BASE_URL}/config/status?t=${timestamp}`, { cache: 'no-store' }).catch(() => null)
-        ]);
-
-        if (studentsRes && studentsRes.ok) localStorage.setItem('students', JSON.stringify(await studentsRes.json()));
-        if (logsRes && logsRes.ok) localStorage.setItem('attendanceLogs', JSON.stringify(await logsRes.json()));
-        if (configRes && configRes.ok) {
-            const configData = await configRes.json();
-            let localConfig = JSON.parse(localStorage.getItem('sys_config') || '{"locked":false,"regOpen":false}');
-            localConfig.locked = configData.isLocked;
-            localStorage.setItem('sys_config', JSON.stringify(localConfig));
-            applySystemConfig();
-        }
-
-        // 2. APPLY YOUR SPECIFIC EDIT LOCALLY TO THE FRESH DATA
-        const shouldPush = modifierCallback();
-        if (shouldPush === false) { 
-            hideLoadingOverlay(); 
-            return; 
-        }
-
-        // 3. PUSH THE UPDATED, SYNCED DATA BACK
-        const studentsData = localStorage.getItem('students') || "[]";
-        const logsData = localStorage.getItem('attendanceLogs') || "[]";
-        const configData = localStorage.getItem('sys_config') || '{"locked":false,"regOpen":false}';
-
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 20000); 
-        const pushRes = await fetch(`${API_BASE_URL}/sync/push`, {
+        // 🟢 INCREASED TIMEOUT: Gives Render DB 25 seconds to respond before failing
+        const timeoutId = setTimeout(() => controller.abort(), 25000); 
+
+        const response = await fetch(`${API_BASE_URL}/sync/push`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ students: studentsData, logs: logsData, config: configData }),
+            body: JSON.stringify({
+                students: studentsData,
+                logs: logsData,
+                config: configData
+            }),
             signal: controller.signal
         });
+        
         clearTimeout(timeoutId);
 
-        if (!pushRes.ok) throw new Error("Database rejected update.");
-        
-        lastDataPushTime = Date.now();
-        forceInstantUIRefresh();
+        if (!response.ok) throw new Error("Server rejected push.");
     } catch (e) {
-        console.error(e);
-        alert(`Network Error: ${actionName} failed. Please try again.`);
-    } finally {
-        hideLoadingOverlay();
+        console.warn("Cloud push error:", e.message);
     }
 }
 
@@ -734,190 +744,64 @@ async function generateRegistrationLink() {
     }
 }
 
-async function safeDatabaseUpdate(actionMessage, updateLogic) {
-    showLoadingOverlay(`Syncing ${actionMessage}...`);
-    try {
-        // 1. STRICT PULL: Force the device to download the absolute latest truth from the database first
-        const pullRes = await fetch(`${API_BASE_URL}/sync/pull?t=${Date.now()}`, { cache: 'no-store' });
-        if (pullRes.ok) {
-            const data = await pullRes.json();
-            if (data.students && data.students !== "null") localStorage.setItem('students', data.students);
-            if (data.logs && data.logs !== "null") localStorage.setItem('attendanceLogs', data.logs);
-            if (data.config && data.config !== "{}" && data.config !== "null") localStorage.setItem('sys_config', data.config);
-        } else {
-            throw new Error("Could not fetch latest database state.");
-        }
-
-        // 2. APPLY EDIT: Run your local change on the freshly downloaded data
-        const proceed = updateLogic();
-        if (proceed === false) {
-            hideLoadingOverlay();
-            return;
-        }
-
-        // 3. STRICT PUSH: Upload the safely merged data back to the database
-        const studentsData = localStorage.getItem('students') || "[]";
-        const logsData = localStorage.getItem('attendanceLogs') || "[]";
-        const configData = localStorage.getItem('sys_config') || '{"locked":false,"regOpen":false}';
-
-        const pushRes = await fetch(`${API_BASE_URL}/sync/push`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ students: studentsData, logs: logsData, config: configData })
-        });
-
-        if (!pushRes.ok) throw new Error("Database rejected update.");
-
-        forceInstantUIRefresh();
-    } catch (e) {
-        console.error(e);
-        alert(`Network Error during ${actionMessage}. Please try again.`);
-    } finally {
-        hideLoadingOverlay();
-    }
-}
-
-async function pushDataToCloud() {
-    lastDataPushTime = Date.now();
-    const studentsData = localStorage.getItem('students') || "[]";
-    const logsData = localStorage.getItem('attendanceLogs') || "[]";
-    const configData = localStorage.getItem('sys_config') || '{"locked":false,"regOpen":false}';
-    try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 15000); 
-        await fetch(`${API_BASE_URL}/sync/push`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ students: studentsData, logs: logsData, config: configData }),
-            signal: controller.signal
-        });
-        clearTimeout(timeoutId);
-    } catch (e) {}
-}
-
 async function createStudent() {
     if(!isAuthenticated()) return;
     const nameInput = document.getElementById('new-student-name').value.trim();
     const idInput = document.getElementById('new-student-id').value.trim();
     const classLvl = document.getElementById('new-student-class').value;
     let gcHandle = document.getElementById('new-student-gc').value;
+    const msg = document.getElementById('admin-message');
+
+    // NEW: Capture the selected schedule days
     const selectedDays = Array.from(document.querySelectorAll('.new-stu-day:checked')).map(cb => cb.value);
 
-    if (!nameInput || !idInput || !classLvl || !gcHandle) return;
+    if (!nameInput || !idInput || !classLvl || !gcHandle) {
+        msg.textContent = "Please fill all fields.";
+        msg.className = "message error";
+        return;
+    }
+
     if (gcHandle === 'Other') {
         const otherInput = document.getElementById('new-student-gc-other');
         if (otherInput) gcHandle = otherInput.value.trim();
     }
 
-    await pullFromCloud();
     let students = JSON.parse(localStorage.getItem('students')) || [];
-    if (students.find(s => String(s.id) === idInput)) return;
     
-    students.push({ name: nameInput, id: idInput, classLevel: classLvl, gcHandle: gcHandle, assignedDays: selectedDays });
+    if (students.find(s => String(s.id) === idInput)) {
+        msg.textContent = "Student ID already exists!";
+        msg.className = "message error";
+        return;
+    }
+
+    // Add new student with schedule
+    students.push({
+        name: nameInput,
+        id: idInput,
+        classLevel: classLvl,
+        gcHandle: gcHandle,
+        assignedDays: selectedDays // Saves the checked days instantly
+    });
+
     localStorage.setItem('students', JSON.stringify(students));
-    pushDataToCloud();
     
+    msg.textContent = "Student Support added successfully!";
+    msg.className = "message success";
+    
+    // Clear inputs
     document.getElementById('new-student-name').value = '';
     document.getElementById('new-student-id').value = '';
     document.getElementById('new-student-class').value = '';
     document.getElementById('new-student-gc').value = '';
     document.querySelectorAll('.new-stu-day').forEach(cb => cb.checked = false);
-    forceInstantUIRefresh();
-}
 
-async function saveStudentEdit() {
-    if(!isAuthenticated()) return;
-    const origId = document.getElementById('edit-stu-orig-id').value;
-    const newName = document.getElementById('edit-stu-name').value.trim();
-    const newId = document.getElementById('edit-stu-id').value.trim();
-    const newClass = document.getElementById('edit-stu-class').value;
-    let newGc = document.getElementById('edit-stu-gc').value;
-    if (newGc === 'Other') newGc = document.getElementById('edit-stu-gc-other').value.trim();
-
-    if (!newName || !newId) return;
-
-    await pullFromCloud();
-    let students = JSON.parse(localStorage.getItem('students')) || [];
-    let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
-
-    if (origId !== newId && students.some(s => String(s.id) === newId)) return;
-
-    const studentIndex = students.findIndex(s => String(s.id) === origId);
-    if (studentIndex > -1) {
-        students[studentIndex].name = newName;
-        students[studentIndex].id = newId;
-        students[studentIndex].classLevel = newClass;
-        students[studentIndex].gcHandle = newGc; 
-    }
-
-    logs.forEach(l => { if (String(l.id) === origId) { l.id = newId; l.name = newName; } });
+    await pushLogsToCloud();
     
-    localStorage.setItem('students', JSON.stringify(students));
-    localStorage.setItem('attendanceLogs', JSON.stringify(logs));
-    pushDataToCloud();
-    closeEditStudentModal();
-    forceInstantUIRefresh();
-}
-
-async function updateStudentGC() {
-    if(!isAuthenticated()) return;
-    const idNum = document.getElementById('edit-student-id').value.trim();
-    const newGc = document.getElementById('edit-student-gc').value.trim();
-
-    if (!idNum) return;
-
-    await pullFromCloud();
-    let students = JSON.parse(localStorage.getItem('students')) || [];
-    const studentIndex = students.findIndex(s => String(s.id) === String(idNum));
-
-    if (studentIndex === -1) return;
+    renderStudents();
+    renderSchedule();
     
-    students[studentIndex].gcHandle = newGc;
-    localStorage.setItem('students', JSON.stringify(students));
-    pushDataToCloud();
-    
-    document.getElementById('edit-student-id').value = '';
-    document.getElementById('edit-student-gc').value = '';
-    forceInstantUIRefresh();
-}
-
-async function deleteStudent(idNum) {
-    if(!isAuthenticated()) return;
-    if (!confirm("Are you sure you want to permanently delete this student?")) return;
-
-    await pullFromCloud();
-    let students = JSON.parse(localStorage.getItem('students')) || [];
-    students = students.filter(s => String(s.id) !== String(idNum));
-    
-    let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
-    logs = logs.filter(l => String(l.id) !== String(idNum));
-    
-    localStorage.setItem('students', JSON.stringify(students));
-    localStorage.setItem('attendanceLogs', JSON.stringify(logs));
-    pushDataToCloud();
-    forceInstantUIRefresh();
-}
-
-async function toggleAssignedDay(studentId, dayStr, btnElement) {
-    if(!isAuthenticated()) return;
-
-    await pullFromCloud();
-    let students = JSON.parse(localStorage.getItem('students')) || [];
-    const studentIndex = students.findIndex(s => String(s.id) === String(studentId));
-    
-    if (studentIndex > -1) {
-        if (!students[studentIndex].assignedDays) students[studentIndex].assignedDays = [];
-        const hasDay = students[studentIndex].assignedDays.includes(dayStr);
-        if (hasDay) {
-            students[studentIndex].assignedDays = students[studentIndex].assignedDays.filter(d => d !== dayStr);
-            btnElement.classList.remove('active');
-        } else {
-            students[studentIndex].assignedDays.push(dayStr);
-            btnElement.classList.add('active');
-        }
-        localStorage.setItem('students', JSON.stringify(students));
-        pushDataToCloud();
-        forceInstantUIRefresh();
+    if (document.getElementById('sec-dashboard') && document.getElementById('sec-dashboard').classList.contains('active')) {
+        renderDashboardSummary(); 
     }
 }
 
@@ -947,21 +831,33 @@ async function updateStudentGC() {
     const idNum = document.getElementById('edit-student-id').value.trim();
     const newGc = document.getElementById('edit-student-gc').value.trim();
 
-    if (!idNum) return;
+    if (!idNum) {
+        showMessage('edit-gc-message', 'Please enter a Student ID.', 'error');
+        return;
+    }
 
     await pullFromCloud();
-    let students = JSON.parse(localStorage.getItem('students')) || [];
+    const students = JSON.parse(localStorage.getItem('students')) || [];
     const studentIndex = students.findIndex(s => String(s.id) === String(idNum));
 
-    if (studentIndex === -1) return;
-    
+    if (studentIndex === -1) {
+        showMessage('edit-gc-message', 'Student ID not found!', 'error');
+        return;
+    }
+
     students[studentIndex].gcHandle = newGc;
     localStorage.setItem('students', JSON.stringify(students));
-    pushDataToCloud();
-    
+    await pushStudentsToCloud(); 
+
     document.getElementById('edit-student-id').value = '';
     document.getElementById('edit-student-gc').value = '';
-    forceInstantUIRefresh();
+    showMessage('edit-gc-message', 'GC Handle updated globally!', 'success');
+    
+    renderStudents();
+    renderSchedule();
+    renderMainDashboard(); 
+    renderDashboardSummary();
+    renderDutyToday();
 }
 
 function openEditStudentModal(id) {
@@ -1014,75 +910,134 @@ function closeEditStudentModal() {
 
 async function saveStudentEdit() {
     if(!isAuthenticated()) return;
-    const origId = document.getElementById('edit-stu-orig-id').value;
-    const newName = document.getElementById('edit-stu-name').value.trim();
-    const newId = document.getElementById('edit-stu-id').value.trim();
-    const newClass = document.getElementById('edit-stu-class').value;
-    let newGc = document.getElementById('edit-stu-gc').value;
-    if (newGc === 'Other') newGc = document.getElementById('edit-stu-gc-other').value.trim();
+    
+    // --- 1. Start Advanced "Saving" Sequence ---
+    const saveBtn = document.querySelector('#edit-student-modal .btn-primary');
+    let seqIndex = 0;
+    let animInterval;
+    const saveSequence = [
+        "Saving.", 
+        "Saving..", 
+        "Saving...", 
+        "Saving. (Press Cancel — it’ll save soon.)",
+        "Saving.. (Press Cancel — it’ll save soon.)",
+        "Saving... (Press Cancel — it’ll save soon.)"
+    ];
 
-    if (!newName || !newId) return;
-
-    await pullFromCloud();
-    let students = JSON.parse(localStorage.getItem('students')) || [];
-    let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
-
-    if (origId !== newId && students.some(s => String(s.id) === newId)) return;
-
-    const studentIndex = students.findIndex(s => String(s.id) === origId);
-    if (studentIndex > -1) {
-        students[studentIndex].name = newName;
-        students[studentIndex].id = newId;
-        students[studentIndex].classLevel = newClass;
-        students[studentIndex].gcHandle = newGc; 
+    if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.style.opacity = "0.8";
+        saveBtn.textContent = saveSequence[0];
+        animInterval = setInterval(() => {
+            seqIndex = (seqIndex + 1) % saveSequence.length;
+            saveBtn.textContent = saveSequence[seqIndex];
+        }, 600); // 600ms gives time to read the text
     }
 
-    logs.forEach(l => { if (String(l.id) === origId) { l.id = newId; l.name = newName; } });
-    
-    localStorage.setItem('students', JSON.stringify(students));
-    localStorage.setItem('attendanceLogs', JSON.stringify(logs));
-    pushDataToCloud();
-    closeEditStudentModal();
-    forceInstantUIRefresh();
+    try {
+        lastDataPushTime = Date.now(); 
+
+        const origId = document.getElementById('edit-stu-orig-id').value;
+        const newName = document.getElementById('edit-stu-name').value.trim();
+        const newId = document.getElementById('edit-stu-id').value.trim();
+        const newClass = document.getElementById('edit-stu-class').value;
+        let newGc = document.getElementById('edit-stu-gc').value;
+        if (newGc === 'Other') newGc = document.getElementById('edit-stu-gc-other').value.trim();
+
+        if (!newName || !newId) {
+            alert("Name and ID cannot be empty.");
+            return;
+        }
+
+        let students = JSON.parse(localStorage.getItem('students')) || [];
+        let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
+
+        if (origId !== newId && students.some(s => String(s.id) === newId)) {
+            alert("This Student ID is already in use by another student.");
+            return;
+        }
+
+        const studentIndex = students.findIndex(s => String(s.id) === origId);
+        if (studentIndex > -1) {
+            students[studentIndex].name = newName;
+            students[studentIndex].id = newId;
+            students[studentIndex].classLevel = newClass;
+            students[studentIndex].gcHandle = newGc; 
+        }
+
+        logs.forEach(l => {
+            if (String(l.id) === origId) { l.id = newId; l.name = newName; }
+        });
+
+        localStorage.setItem('students', JSON.stringify(students));
+        localStorage.setItem('attendanceLogs', JSON.stringify(logs));
+        
+        await pushLogsToCloud();
+        await new Promise(resolve => setTimeout(resolve, 800));
+
+    } finally {
+        // --- Reset and Close ---
+        if (saveBtn) {
+            clearInterval(animInterval);
+            saveBtn.textContent = "Save Changes";
+            saveBtn.disabled = false;
+            saveBtn.style.opacity = "1";
+        }
+        closeEditStudentModal();
+        forceInstantUIRefresh();
+    }
 }
 
 async function deleteStudent(idNum) {
     if(!isAuthenticated()) return;
     if (!confirm("Are you sure you want to permanently delete this student?")) return;
-
-    await pullFromCloud();
+    
     let students = JSON.parse(localStorage.getItem('students')) || [];
     students = students.filter(s => String(s.id) !== String(idNum));
-    
+    localStorage.setItem('students', JSON.stringify(students));
+
     let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
     logs = logs.filter(l => String(l.id) !== String(idNum));
-    
-    localStorage.setItem('students', JSON.stringify(students));
     localStorage.setItem('attendanceLogs', JSON.stringify(logs));
-    pushDataToCloud();
-    forceInstantUIRefresh();
+
+    try { await pushLogsToCloud(); } catch(e){} 
+    
+    if (document.getElementById('sec-data') && document.getElementById('sec-data').classList.contains('active')) renderStudents();
+    if (document.getElementById('sec-schedule') && document.getElementById('sec-schedule').classList.contains('active')) renderSchedule();
+    if (document.getElementById('sec-dashboard') && document.getElementById('sec-dashboard').classList.contains('active')) renderDashboardSummary();
+    
+    const dateStr = document.getElementById('history-table-title')?.getAttribute('data-date');
+    if (dateStr && document.getElementById('sec-history') && document.getElementById('sec-history').classList.contains('active')) renderHistoryTable(dateStr);
 }
 
 async function toggleAssignedDay(studentId, dayStr, btnElement) {
     if(!isAuthenticated()) return;
-
-    await pullFromCloud();
     let students = JSON.parse(localStorage.getItem('students')) || [];
     const studentIndex = students.findIndex(s => String(s.id) === String(studentId));
     
     if (studentIndex > -1) {
         if (!students[studentIndex].assignedDays) students[studentIndex].assignedDays = [];
+        
+        // Check if the student currently has this day assigned
         const hasDay = students[studentIndex].assignedDays.includes(dayStr);
+        
         if (hasDay) {
+            // Remove the day and remove the CSS 'active' glow
             students[studentIndex].assignedDays = students[studentIndex].assignedDays.filter(d => d !== dayStr);
             btnElement.classList.remove('active');
         } else {
+            // Add the day and add the CSS 'active' glow
             students[studentIndex].assignedDays.push(dayStr);
             btnElement.classList.add('active');
         }
+        
         localStorage.setItem('students', JSON.stringify(students));
-        pushDataToCloud();
-        forceInstantUIRefresh();
+        
+        try { await pushLogsToCloud(); } catch(e){} 
+        
+        if (document.getElementById('sec-dashboard') && document.getElementById('sec-dashboard').classList.contains('active')) {
+            renderDashboardSummary(); 
+        }
     }
 }
 
@@ -1158,28 +1113,76 @@ async function logAttendanceAction(student, action, endOfShiftDetails = null, ov
 
 async function deleteLog(idNum, dateStr) {
     if(!isAuthenticated()) return;
-    if (!confirm("Are you sure you want to delete this attendance record?")) return;
 
-    await pullFromCloud();
+    // 1. Safety check to ensure the button actually passed the right data
+    if (!idNum || !dateStr) {
+        console.error("Delete failed: Missing ID or Date. ID:", idNum, "Date:", dateStr);
+        alert("System error: Missing log data. Check console.");
+        return;
+    }
+
+    const confirmDelete = confirm("Are you sure you want to delete this attendance record?");
+    if (!confirmDelete) return;
+
+    // 2. INSTANT FRONTEND REMOVAL (Optimistic UI)
     let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
-    logs = logs.filter(l => !(String(l.id).trim() === String(idNum).trim() && String(l.date).trim() === String(dateStr).trim()));
-    localStorage.setItem('attendanceLogs', JSON.stringify(logs));
-    pushDataToCloud();
+    const originalLength = logs.length;
+    
+    // Filter out the deleted log (using String and trim() to guarantee a match)
+    const updatedLogs = logs.filter(l => 
+        !(String(l.id).trim() === String(idNum).trim() && String(l.date).trim() === String(dateStr).trim())
+    );
+    
+    if (updatedLogs.length === originalLength) {
+        console.warn("Warning: Could not find the log to delete in local storage!");
+    }
+
+    // Save the new list to browser memory instantly
+    localStorage.setItem('attendanceLogs', JSON.stringify(updatedLogs));
+    
+    // Lock the background sync immediately!
+    lastDataPushTime = Date.now(); 
+
+    // Instantly redraw the screen! The log will vanish in milliseconds.
     forceInstantUIRefresh();
+
+    // 3. BACKGROUND DATABASE SYNC
+    const spinner = document.getElementById('live-log-spinner');
+    if (spinner) spinner.style.display = 'inline-block';
+
+    try {
+        await pushLogsToCloud();
+    } catch (e) {
+        console.error("Failed to sync deletion to the cloud:", e);
+    } finally {
+        if (spinner) spinner.style.display = 'none';
+    }
 }
 
-async function deleteHistoryDate(dateStr, event) {
+function deleteHistoryDate(dateStr, event) {
     if(!isAuthenticated()) return;
     if (event) event.stopPropagation(); 
     
-    if(confirm(`⚠️ WARNING ⚠️\n\nAre you sure you want to completely delete ALL attendance logs for ${dateStr}?`)) {
-        await pullFromCloud();
+    if(confirm(`⚠️ WARNING ⚠️\n\nAre you sure you want to completely delete ALL attendance logs for ${dateStr}?\n\nThis will permanently remove this day from the students' Performance Stats.`)) {
+        
         let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
         logs = logs.filter(l => l.date !== dateStr);
-        logs.push({ name: 'SYSTEM_DELETED', id: 'SYS_DELETED_DATE', action: 'DELETED', time: '00:00 AM', date: dateStr, details: null });
+        logs.push({
+            name: 'SYSTEM_DELETED',
+            id: 'SYS_DELETED_DATE',
+            action: 'DELETED',
+            time: '00:00 AM',
+            date: dateStr,
+            details: null
+        });
+        
         localStorage.setItem('attendanceLogs', JSON.stringify(logs));
-        pushDataToCloud();
-        forceInstantUIRefresh();
+        pushLogsToCloud(); 
+        
+        renderHistoryView();
+        if (document.getElementById('admin-dashboard-view').classList.contains('active')) {
+            renderMainDashboard();
+        }
         
         const titleEl = document.getElementById('history-table-title');
         if (titleEl && titleEl.textContent.includes(dateStr)) {
@@ -1212,8 +1215,21 @@ function closeExemptModal() {
 
 async function applyExempt(type) {
     if(!isAuthenticated()) return;
+    
+    const clickedBtn = window.event ? window.event.target.closest('button') : null;
+    const originalText = clickedBtn ? clickedBtn.textContent : "";
+    const originalColor = clickedBtn ? clickedBtn.style.backgroundColor : "";
+    
+    if (clickedBtn) {
+        clickedBtn.textContent = "SAVED ✓";
+        clickedBtn.disabled = true;
+        // Optionally make it flash green
+        clickedBtn.style.backgroundColor = "var(--success, #28a745)"; 
+        clickedBtn.style.color = "#fff";
+    }
 
-    await pullFromCloud();
+    lastDataPushTime = Date.now(); 
+
     let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
     const students = JSON.parse(localStorage.getItem('students')) || [];
     const s = students.find(x => String(x.id) === String(pendingExemptId));
@@ -1226,42 +1242,73 @@ async function applyExempt(type) {
             logs = logs.filter(l => !(String(l.id) === String(pendingExemptId) && l.date === pendingExemptDate && l.action.includes('Time In')));
             logs.push({ name: s.name, id: s.id, action: 'Time In (Exempted)', time: 'Exempted', date: pendingExemptDate, details: null, originalLog: existingInLog || null });
         }
+        
         if (type === 'OUT' || type === 'BOTH') {
             logs = logs.filter(l => !(String(l.id) === String(pendingExemptId) && l.date === pendingExemptDate && l.action.includes('Time Out')));
             logs.push({ name: s.name, id: s.id, action: 'Time Out (Exempted)', time: 'Exempted', date: pendingExemptDate, details: { gcHandle: '-', announcement: '-', whoPosted: '-' }, originalLog: existingOutLog || null });
         }
-        localStorage.setItem('attendanceLogs', JSON.stringify(logs));
-        pushDataToCloud();
-    }
 
+        localStorage.setItem('attendanceLogs', JSON.stringify(logs));
+        
+        await pushLogsToCloud(); 
+        
+        // --- Wait a tiny bit so they can actually see the "SAVED ✓" text ---
+        await new Promise(resolve => setTimeout(resolve, 800));
+        
+        renderHistoryTable(pendingExemptDate);
+        renderMainDashboard();
+    }
+    
     const modal = document.getElementById('exempt-modal');
     if (modal) modal.style.display = 'none';
-    pendingExemptId = null; pendingExemptDate = null; pendingExemptCheckbox = null;
+    
+    // --- Reset everything ---
+    if (clickedBtn) {
+        clickedBtn.textContent = originalText;
+        clickedBtn.disabled = false;
+        clickedBtn.style.backgroundColor = originalColor;
+        clickedBtn.style.color = "";
+    }
+    
+    pendingExemptId = null;
+    pendingExemptDate = null;
+    pendingExemptCheckbox = null;
+    
     forceInstantUIRefresh();
 }
 
 async function removeExemptions(idNum, dateStr) {
     if(!isAuthenticated()) return;
-
     await pullFromCloud();
     let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
+    
     const exemptLogs = logs.filter(l => String(l.id) === String(idNum) && l.date === dateStr && l.action.includes('Exempted'));
     logs = logs.filter(l => !(String(l.id) === String(idNum) && l.date === dateStr && l.action.includes('Exempted')));
     
-    exemptLogs.forEach(el => { if (el.originalLog) logs.push(el.originalLog); });
+    exemptLogs.forEach(el => {
+        if (el.originalLog) logs.push(el.originalLog);
+    });
+    
     localStorage.setItem('attendanceLogs', JSON.stringify(logs));
-    pushDataToCloud();
-    forceInstantUIRefresh();
+    await pushLogsToCloud();
+    
+    renderHistoryTable(dateStr);
+    renderMainDashboard();
 }
 
 async function exemptAllForDate(dateStr) {
     if(!isAuthenticated()) return;
+    
     const verificationText = prompt(`⚠️ WARNING ⚠️\n\nThis will mark EVERYONE on ${dateStr} as Exempted.\n\nTo confirm, type exactly:\nExempt Everyone`);
     
     if (verificationText === "Exempt Everyone") {
-        await pullFromCloud();
+        
+        // Lock the sync engine
+        lastDataPushTime = Date.now(); 
+        
         let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
         const students = JSON.parse(localStorage.getItem('students')) || [];
+
         const targetDateObj = new Date(dateStr);
         const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
         const targetDayStr = dayNames[targetDateObj.getDay()];
@@ -1274,12 +1321,38 @@ async function exemptAllForDate(dateStr) {
             const existingOutLog = logs.find(l => String(l.id) === String(idNum) && l.date === dateStr && l.action.includes('Time Out') && !l.action.includes('Exempted'));
 
             logs = logs.filter(l => !(String(l.id) === String(idNum) && l.date === dateStr));
-            logs.push({ name: s.name, id: s.id, action: 'Time In (Exempted)', time: 'Exempted', date: dateStr, details: null, originalLog: existingInLog || null });
-            logs.push({ name: s.name, id: s.id, action: 'Time Out (Exempted)', time: 'Exempted', date: dateStr, details: { gcHandle: '-', announcement: '-', whoPosted: '-' }, originalLog: existingOutLog || null });
+
+            logs.push({
+                name: s.name,
+                id: s.id,
+                action: 'Time In (Exempted)',
+                time: 'Exempted',
+                date: dateStr,
+                details: null,
+                originalLog: existingInLog || null
+            });
+
+            logs.push({
+                name: s.name,
+                id: s.id,
+                action: 'Time Out (Exempted)',
+                time: 'Exempted',
+                date: dateStr,
+                details: { gcHandle: '-', announcement: '-', whoPosted: '-' },
+                originalLog: existingOutLog || null
+            });
         });
+
         localStorage.setItem('attendanceLogs', JSON.stringify(logs));
-        pushDataToCloud();
-        forceInstantUIRefresh();
+        await pushLogsToCloud();
+        
+        renderHistoryTable(dateStr);
+        renderMainDashboard();
+        
+        alert(`Successfully marked everyone as exempted for ${dateStr}!`);
+        
+    } else if (verificationText !== null) {
+        alert("Action canceled. The confirmation text did not match exactly.");
     }
 }
 
@@ -1293,21 +1366,50 @@ async function createManualHistoryDate() {
         const parsed = new Date(dateInput.trim());
         if(isNaN(parsed)) throw new Error("");
         dateStr = parsed.toLocaleDateString('en-US'); 
-    } catch(e) { return; }
+    } catch(e) {
+        alert("Invalid date format. Please use M/D/YYYY (e.g., 5/4/2026).");
+        return;
+    }
+
+    lastDataPushTime = Date.now();
 
     await pullFromCloud();
     let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
+    
     const isTombstoned = logs.some(l => l.id === 'SYS_DELETED_DATE' && l.date === dateStr);
     const hasActualLogs = logs.some(l => l.date === dateStr && l.id !== 'SYS_DELETED_DATE');
 
-    if (hasActualLogs && !isTombstoned) return;
+    if (hasActualLogs && !isTombstoned) {
+        alert("A card for this date already exists.");
+        return;
+    }
 
     logs = logs.filter(l => !(l.id === 'SYS_DELETED_DATE' && l.date === dateStr));
-    logs.push({ name: 'SYSTEM_INIT', id: 'SYS_INIT_DATE', action: 'INIT', time: '00:00 AM', date: dateStr, details: null });
+
+    const initLog = {
+        name: 'SYSTEM_INIT',
+        id: 'SYS_INIT_DATE',
+        action: 'INIT',
+        time: '00:00 AM',
+        date: dateStr,
+        details: null
+    };
+
+    logs.push(initLog);
     
     localStorage.setItem('attendanceLogs', JSON.stringify(logs));
-    pushDataToCloud();
+    
+    // 2. Push to Supabase
+    try {
+        await pushLogsToCloud();
+    } catch(e) {
+        console.error("Failed to push new Date Card to the cloud", e);
+    }
+
+    // 3. Instant Auto-Refresh UI!
+    renderHistoryView();
     forceInstantUIRefresh();
+    alert(`Date Card for ${dateStr} created successfully!`);
 }
 
 async function devClearLogs() {
@@ -1378,7 +1480,7 @@ async function handleTimeIn() {
         let dots = 0;
         animInterval = setInterval(() => {
             dots = (dots + 1) % 4;
-            btnIn.textContent = "SAVING" + ".".repeat(dots);
+            btnIn.textContent = "SAVING YOUR TIME IN" + ".".repeat(dots);
         }, 500);
     }
 
@@ -1393,6 +1495,7 @@ async function handleTimeIn() {
 
     try {
         await pullFromCloud();
+
         const idInput = document.getElementById('student-id-input'); 
         const messageEl = document.getElementById('student-message');
 
@@ -1402,9 +1505,10 @@ async function handleTimeIn() {
         if (!studentId) { messageEl.textContent = "Please enter your Student ID Number."; messageEl.className = "message error"; stopAnim(); return; }
 
         const timeWindow = getCurrentTimeWindow();
+
         if (timeWindow === "TOO_EARLY") { messageEl.textContent = "Shift has not started yet. Time In opens at 5:00 AM."; messageEl.className = "message error"; stopAnim(); return; }
-        if (timeWindow === "LOCKOUT") { messageEl.textContent = "System Locked. If you missed Time In, you are marked Absent."; messageEl.className = "message error"; stopAnim(); return; }
-        if (timeWindow === "TIME_OUT_NORMAL" || timeWindow === "TIME_OUT_LATE") { messageEl.textContent = "Time In is closed for this shift."; messageEl.className = "message error"; stopAnim(); return; }
+        if (timeWindow === "LOCKOUT") { messageEl.textContent = "System Locked (12:01 PM - 4:59 PM). If you missed Time In, you are marked Absent."; messageEl.className = "message error"; stopAnim(); return; }
+        if (timeWindow === "TIME_OUT_NORMAL" || timeWindow === "TIME_OUT_LATE") { messageEl.textContent = "Time In is closed for this shift. It is currently the Time Out period."; messageEl.className = "message error"; stopAnim(); return; }
 
         let actionStr = "Time In";
         if (timeWindow === "TIME_IN_LATE") actionStr = "Time In (Late)";
@@ -1421,19 +1525,62 @@ async function handleTimeIn() {
         const alreadyTimedIn = logs.some(l => String(l.id).toLowerCase() === studentId.toLowerCase() && l.date === shift.dateStr && l.action.includes('Time In'));
         if (alreadyTimedIn) { messageEl.textContent = "You have already timed in for this shift."; messageEl.className = "message error"; stopAnim(); return; }
 
-        logs.push({
+        const newLog = {
             name: student.name,
             id: student.id,
             action: actionStr,
             time: shift.realTimeStr,
             date: shift.dateStr,
             details: null
+        };
+
+        const tempLogs = [...logs, newLog];
+        const studentsData = localStorage.getItem('students') || "[]";
+        const logsData = JSON.stringify(tempLogs);
+        const configData = localStorage.getItem('sys_config') || '{"locked":false,"regOpen":false}';
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 20000); 
+
+        // 1. PUSH TO DATABASE
+        const response = await fetch(`${API_BASE_URL}/sync/push`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ students: studentsData, logs: logsData, config: configData }),
+            signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+        if (!response.ok) throw new Error("Server rejected the database insertion.");
+
+        // 🟢 2. THE DOUBLE CHECK (Verification)
+        if (btnIn) btnIn.textContent = "VERIFYING...";
+        
+        const verifyRes = await fetch(`${API_BASE_URL}/sync/pull?t=${Date.now()}`, {
+            cache: 'no-store',
+            headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
         });
 
-        localStorage.setItem('attendanceLogs', JSON.stringify(logs));
-        localStorage.setItem('activeDeviceStudent', student.id);
+        if (!verifyRes.ok) throw new Error("Could not verify database entry.");
         
-        pushDataToCloud();
+        const verifyData = await verifyRes.json();
+        const serverLogs = JSON.parse(verifyData.logs || "[]");
+
+        // Physically check the database to see if the log exists
+        const isActuallySaved = serverLogs.some(l => 
+            String(l.id) === String(student.id) && 
+            l.date === shift.dateStr && 
+            l.action === actionStr
+        );
+
+        if (!isActuallySaved) {
+            throw new Error("Verification failed: The database dropped the data.");
+        }
+
+        // 🟢 3. ONLY ON VERIFIED SUCCESS: Update UI with strict Database Data
+        localStorage.setItem('attendanceLogs', verifyData.logs); // Overwrite with DB truth
+        localStorage.setItem('activeDeviceStudent', student.id);
+        lastDataPushTime = Date.now();
         
         messageEl.textContent = `Success: ${student.name} - ${actionStr} at ${shift.realTimeStr}`;
         messageEl.className = "message success";
@@ -1444,6 +1591,12 @@ async function handleTimeIn() {
         stopAnim(); 
 
     } catch (error) {
+        console.error(error);
+        const messageEl = document.getElementById('student-message');
+        if (messageEl) {
+            messageEl.textContent = "Error: System failed to save to database. Please try again.";
+            messageEl.className = "message error";
+        }
         stopAnim(); 
     }
 }
@@ -3572,46 +3725,90 @@ function closeEditLogModal() {
 
 async function saveEditLogModal() {
     if(!isAuthenticated()) return;
-    const idNum = document.getElementById('edit-log-id').value;
-    const dateStr = document.getElementById('edit-log-date').value;
-    const inVal = document.getElementById('edit-log-in').value.trim();
-    const outVal = document.getElementById('edit-log-out').value.trim();
-    let gcHandle = document.getElementById('edit-log-gc').value;
-    if (gcHandle === 'Other') gcHandle = document.getElementById('edit-log-gc-other').value.trim() || '-';
-    const ann = document.getElementById('edit-log-ann').value;
-    const post = document.getElementById('edit-log-post').value;
 
-    await pullFromCloud();
-    let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
-    const students = JSON.parse(localStorage.getItem('students')) || [];
-    const student = students.find(s => String(s.id) === String(idNum));
-    if (!student) return;
+    // --- 1. Start Advanced "Saving" Sequence ---
+    const saveBtn = document.querySelector('#edit-log-modal .btn-primary');
+    let seqIndex = 0;
+    let animInterval;
+    const saveSequence = [
+        "Saving.", 
+        "Saving..", 
+        "Saving...", 
+        "Saving. (Press Cancel — it’ll save soon.)",
+        "Saving.. (Press Cancel — it’ll save soon.)",
+        "Saving... (Press Cancel — it’ll save soon.)"
+    ];
 
-    logs = logs.filter(l => !(String(l.id) === String(idNum) && l.date === dateStr));
-
-    if (!inVal && !outVal) {
-        logs.push({ name: student.name || 'Unknown', id: student.id, action: 'No Attendance', time: '00:00:00 AM', date: dateStr, details: null });
-    } else {
-        if (inVal) {
-            const t = inVal.match(/(\d+):(\d+):(\d+)\s+(AM|PM)/i);
-            let h = parseInt(t[1]); const m = parseInt(t[2]); const ampm = t[4].toUpperCase();
-            if (ampm === 'PM' && h !== 12) h += 12; if (ampm === 'AM' && h === 12) h = 0;
-            const newAction = (h > 8 || (h === 8 && m >= 1)) ? 'Time In (Late)' : 'Time In';
-            logs.push({ name: student.name || 'Unknown', id: student.id, action: newAction, time: inVal.toUpperCase(), date: dateStr, details: null });
-        }
-        if (outVal) {
-            const t = outVal.match(/(\d+):(\d+):(\d+)\s+(AM|PM)/i);
-            let h = parseInt(t[1]); const ampm = t[4].toUpperCase();
-            if (ampm === 'PM' && h !== 12) h += 12; if (ampm === 'AM' && h === 12) h = 0;
-            const newAction = (h >= 0 && h <= 4) ? 'Time Out (Late)' : 'Time Out';
-            logs.push({ name: student.name || 'Unknown', id: student.id, action: newAction, time: outVal.toUpperCase(), date: dateStr, details: { gcHandle: gcHandle, announcement: ann, whoPosted: post } });
-        }
+    if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.style.opacity = "0.8";
+        saveBtn.textContent = saveSequence[0];
+        animInterval = setInterval(() => {
+            seqIndex = (seqIndex + 1) % saveSequence.length;
+            saveBtn.textContent = saveSequence[seqIndex];
+        }, 600);
     }
-    
-    localStorage.setItem('attendanceLogs', JSON.stringify(logs));
-    pushDataToCloud();
-    closeEditLogModal();
-    forceInstantUIRefresh();
+
+    try {
+        lastDataPushTime = Date.now(); 
+
+        const idNum = document.getElementById('edit-log-id').value;
+        const dateStr = document.getElementById('edit-log-date').value;
+        const inVal = document.getElementById('edit-log-in').value.trim();
+        const outVal = document.getElementById('edit-log-out').value.trim();
+        
+        let gcHandle = document.getElementById('edit-log-gc').value;
+        if (gcHandle === 'Other') gcHandle = document.getElementById('edit-log-gc-other').value.trim() || '-';
+        
+        const ann = document.getElementById('edit-log-ann').value;
+        const post = document.getElementById('edit-log-post').value;
+
+        const timeRegex = /^(0?[1-9]|1[0-2]):[0-5][0-9]:[0-5][0-9]\s(AM|PM)$/i;
+        if (inVal && !timeRegex.test(inVal)) { alert("Invalid Time In format."); return; }
+        if (outVal && !timeRegex.test(outVal)) { alert("Invalid Time Out format."); return; }
+
+        let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
+        const students = JSON.parse(localStorage.getItem('students')) || [];
+        const student = students.find(s => String(s.id) === String(idNum));
+        
+        if (!student) return;
+
+        logs = logs.filter(l => !(String(l.id) === String(idNum) && l.date === dateStr));
+
+        if (!inVal && !outVal) {
+            logs.push({ name: student.name || 'Unknown', id: student.id, action: 'No Attendance', time: '00:00:00 AM', date: dateStr, details: null });
+        } else {
+            if (inVal) {
+                const t = inVal.match(/(\d+):(\d+):(\d+)\s+(AM|PM)/i);
+                let h = parseInt(t[1]); const m = parseInt(t[2]); const ampm = t[4].toUpperCase();
+                if (ampm === 'PM' && h !== 12) h += 12; if (ampm === 'AM' && h === 12) h = 0;
+                const newAction = (h > 8 || (h === 8 && m >= 1)) ? 'Time In (Late)' : 'Time In';
+                logs.push({ name: student.name || 'Unknown', id: student.id, action: newAction, time: inVal.toUpperCase(), date: dateStr, details: null });
+            }
+            if (outVal) {
+                const t = outVal.match(/(\d+):(\d+):(\d+)\s+(AM|PM)/i);
+                let h = parseInt(t[1]); const ampm = t[4].toUpperCase();
+                if (ampm === 'PM' && h !== 12) h += 12; if (ampm === 'AM' && h === 12) h = 0;
+                const newAction = (h >= 0 && h <= 4) ? 'Time Out (Late)' : 'Time Out';
+                logs.push({ name: student.name || 'Unknown', id: student.id, action: newAction, time: outVal.toUpperCase(), date: dateStr, details: { gcHandle: gcHandle, announcement: ann, whoPosted: post } });
+            }
+        }
+
+        localStorage.setItem('attendanceLogs', JSON.stringify(logs));
+        
+        await pushLogsToCloud();
+        await new Promise(resolve => setTimeout(resolve, 800));
+
+    } catch(e) { console.error(e); } finally {
+        if (saveBtn) {
+            clearInterval(animInterval);
+            saveBtn.textContent = "Save Changes";
+            saveBtn.disabled = false;
+            saveBtn.style.opacity = "1";
+        }
+        closeEditLogModal();
+        forceInstantUIRefresh();
+    }
 }
 
 async function sendHeartbeat() {
@@ -3718,20 +3915,29 @@ async function autoRestoreServerData() {
 
 async function toggleRegistrationState(checkbox) {
     if(!isAuthenticated()) return;
+    
+    // FIX: Strict Admin Role Check
     let tk = sessionStorage.getItem('_auth_tkn_x92');
     let userRole = 'ADMIN';
     try { userRole = JSON.parse(atob(tk)).role || 'ADMIN'; } catch(e) {}
     
-    if (userRole === 'VISITOR') { checkbox.checked = !checkbox.checked; alert("Access Denied."); return; }
+    if (userRole === 'VISITOR') {
+        checkbox.checked = !checkbox.checked; // Revert visually
+        alert("Access Denied: Only Support Heads (Admins) can change system settings.");
+        return;
+    }
 
     const isOpen = checkbox.checked;
-    await directDatabaseUpdate("System Config", () => {
-        let config;
-        try { config = JSON.parse(localStorage.getItem('sys_config') || '{"locked":false,"regOpen":false}'); } 
-        catch(e) { config = { locked: false, regOpen: false }; }
-        config.regOpen = isOpen;
-        localStorage.setItem('sys_config', JSON.stringify(config));
-    });
+    let config;
+    try { config = JSON.parse(localStorage.getItem('sys_config') || '{"locked":false,"regOpen":false}'); } 
+    catch(e) { config = { locked: false, regOpen: false }; }
+    
+    config.regOpen = isOpen;
+    localStorage.setItem('sys_config', JSON.stringify(config));
+    
+    lastDataPushTime = Date.now();
+    applySystemConfig();
+    try { await pushLogsToCloud(); } catch(e) { console.error("Failed to sync registration state."); }
 }
 
 function copyRegLink() {
@@ -4096,8 +4302,6 @@ function viewHistoryDetails(studentId, historyDateStr) {
 }
 
 async function handleTimeOut() {
-    if (typeof isServerKnownAwake !== 'undefined' && !isServerKnownAwake) return;
-
     const btnOut = document.querySelector('.btn-out');
     let animInterval;
 
@@ -4123,6 +4327,7 @@ async function handleTimeOut() {
 
     try {
         await pullFromCloud();
+
         const idInput = document.getElementById('student-id-input'); 
         const messageEl = document.getElementById('student-message');
 
@@ -4132,8 +4337,9 @@ async function handleTimeOut() {
         if (!studentId) { messageEl.textContent = "Please enter your Student ID Number."; messageEl.className = "message error"; stopAnim(); return; }
 
         const timeWindow = getCurrentTimeWindow();
-        if (timeWindow === "LOCKOUT") { messageEl.textContent = "System Locked. Time Out opens at 5:00 PM."; messageEl.className = "message error"; stopAnim(); return; }
-        if (timeWindow === "TIME_IN_NORMAL" || timeWindow === "TIME_IN_LATE" || timeWindow === "TOO_EARLY") { messageEl.textContent = "It is too early to Time Out."; messageEl.className = "message error"; stopAnim(); return; }
+
+        if (timeWindow === "LOCKOUT") { messageEl.textContent = "System Locked (12:01 PM - 4:59 PM). Time Out opens at 5:00 PM."; messageEl.className = "message error"; stopAnim(); return; }
+        if (timeWindow === "TIME_IN_NORMAL" || timeWindow === "TIME_IN_LATE" || timeWindow === "TOO_EARLY") { messageEl.textContent = "It is too early to Time Out. Time Out opens at 5:00 PM."; messageEl.className = "message error"; stopAnim(); return; }
 
         let actionStr = "Time Out";
         if (timeWindow === "TIME_OUT_LATE") actionStr = "Time Out (Late)";
@@ -4153,37 +4359,99 @@ async function handleTimeOut() {
         const alreadyTimedOut = logs.some(l => String(l.id).toLowerCase() === studentId.toLowerCase() && l.date === shift.dateStr && l.action.includes('Time Out'));
         if (alreadyTimedOut) { messageEl.textContent = "You have already timed out for this shift."; messageEl.className = "message error"; stopAnim(); return; }
 
+        // Stop the front button animation, moving to modal phase
         stopAnim();
 
+        // 🟢 SHOW MODAL AND GET DATA
         const reportData = await askForShiftReport(student.gcHandle, student.name);
-        if (!reportData) return; 
+        if (!reportData) return; // User clicked cancel on the modal
 
-        logs.push({
+        // Now we process the DB push. The modal is still open, saying "Submitting..."
+        const newLog = {
             name: student.name,
             id: student.id,
             action: actionStr,
             time: shift.realTimeStr,
             date: shift.dateStr,
-            details: { gcHandle: reportData.gc, announcement: reportData.ann, whoPosted: reportData.name } 
+            details: {
+                gcHandle: reportData.gc,
+                announcement: reportData.ann,
+                whoPosted: reportData.name
+            } 
+        };
+
+        const tempLogs = [...logs, newLog];
+        const studentsData = localStorage.getItem('students') || "[]";
+        const logsData = JSON.stringify(tempLogs);
+        const configData = localStorage.getItem('sys_config') || '{"locked":false,"regOpen":false}';
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 20000); 
+
+        // 1. PUSH DIRECTLY TO DATABASE
+        const response = await fetch(`${API_BASE_URL}/sync/push`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ students: studentsData, logs: logsData, config: configData }),
+            signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+        if (!response.ok) throw new Error("Server rejected the database insertion.");
+
+        // 🟢 2. THE DOUBLE CHECK (Verification)
+        const submitBtn = document.getElementById('rep-submit');
+        if (submitBtn) submitBtn.textContent = "VERIFYING DB..."; // Changes text inside modal
+        
+        const verifyRes = await fetch(`${API_BASE_URL}/sync/pull?t=${Date.now()}`, {
+            cache: 'no-store',
+            headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
         });
 
-        localStorage.setItem('attendanceLogs', JSON.stringify(logs));
-        localStorage.removeItem('activeDeviceStudent'); 
+        if (!verifyRes.ok) throw new Error("Could not verify database entry.");
         
-        pushDataToCloud();
+        const verifyData = await verifyRes.json();
+        const serverLogs = JSON.parse(verifyData.logs || "[]");
+
+        // Physically check the database to confirm it saved
+        const isActuallySaved = serverLogs.some(l => 
+            String(l.id) === String(student.id) && 
+            l.date === shift.dateStr && 
+            l.action === actionStr
+        );
+
+        if (!isActuallySaved) {
+            throw new Error("Verification failed: Database dropped the data.");
+        }
+
+        // 🟢 3. SUCCESS: Update UI and clear locks
+        localStorage.setItem('attendanceLogs', verifyData.logs); // Overwrite with true DB data
+        localStorage.removeItem('activeDeviceStudent'); // 🟢 THIS REMOVES THE DEVICE LOCK!
+        lastDataPushTime = Date.now();
         
+        // 🟢 PROFESSIONAL SUCCESS MESSAGE
         messageEl.textContent = `Success: ${student.name} - ${actionStr} at ${shift.realTimeStr}`;
         messageEl.className = "message success";
         idInput.value = ''; 
 
         const modal = document.getElementById('shift-report-modal');
-        if (modal) modal.remove(); 
+        if (modal) modal.remove(); // Destroy modal so they can see the success text
 
-        checkDeviceLock(); 
+        checkDeviceLock(); // Refreshes the UI to officially hide the yellow lock box
         forceInstantUIRefresh();
 
     } catch (error) {
-        stopAnim();
+        console.error(error);
+        const submitBtn = document.getElementById('rep-submit');
+        if (submitBtn) {
+            submitBtn.textContent = "Submit"; // Reset modal button so they can try again
+            submitBtn.disabled = false;
+            submitBtn.style.opacity = "1";
+        }
+        const cancelBtn = document.getElementById('rep-cancel');
+        if (cancelBtn) cancelBtn.style.display = "block";
+
+        alert("Network Error: Could not verify Time Out in the Database. Please click Submit again.");
     }
 }
 
