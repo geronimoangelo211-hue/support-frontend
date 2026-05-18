@@ -392,22 +392,13 @@ _studentsInit.forEach(s => {
         delete s.assignedDay;
         _needsSave = true;
     }
-    if (!s.assignedDays) {
-        s.assignedDays = [];
-        _needsSave = true;
-    }
-    if (!s.gcHandle) {
-        s.gcHandle = '';
-        _needsSave = true;
-    }
-    if (!s.classLevel) {
-        s.classLevel = 'Freshmen'; 
-        _needsSave = true;
-    }
+    if (!s.assignedDays) { s.assignedDays = []; _needsSave = true; }
+    if (!s.gcHandle) { s.gcHandle = ''; _needsSave = true; }
+    if (!s.classLevel) { s.classLevel = 'Freshmen'; _needsSave = true; }
 });
-if (_needsSave && isAuthenticated()) {
+
+if (_needsSave) {
     localStorage.setItem('students', JSON.stringify(_studentsInit));
-    pushLogsToCloud();
 }
 
 document.addEventListener('DOMContentLoaded', () => {
