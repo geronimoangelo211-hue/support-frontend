@@ -206,37 +206,40 @@ async function pullFromCloud() {
 
     try {
         const timestamp = new Date().getTime();
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 sec for pull
+
+        const response = await fetch(`${API_BASE_URL}/sync/pull?t=${timestamp}`, {
+            cache: 'no-store',
+            headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
+            signal: controller.signal
+        });
         
-        // Parallel queries to individual, transactional routes
-        const [studentsRes, logsRes, configRes] = await Promise.all([
-            fetch(`${API_BASE_URL}/students?t=${timestamp}`, { cache: 'no-store' }),
-            fetch(`${API_BASE_URL}/logs?t=${timestamp}`, { cache: 'no-store' }),
-            fetch(`${API_BASE_URL}/config/status?t=${timestamp}`, { cache: 'no-store' })
-        ]);
+        clearTimeout(timeoutId);
 
-        if (studentsRes.ok) {
-            const studentsData = await studentsRes.json();
-            localStorage.setItem('students', JSON.stringify(studentsData));
-        }
-        if (logsRes.ok) {
-            const logsData = await logsRes.json();
-            localStorage.setItem('attendanceLogs', JSON.stringify(logsData));
-        }
-        if (configRes.ok) {
-            const configData = await configRes.json();
-            let localConfig = JSON.parse(localStorage.getItem('sys_config') || '{"locked":false,"regOpen":false}');
-            localConfig.locked = configData.isLocked;
-            localStorage.setItem('sys_config', JSON.stringify(localConfig));
-            applySystemConfig();
-        }
+        if (response.ok) {
+            const data = await response.json();
+            
+            // 🟢 STRICT DATABASE OVERRIDE: The Database is King. No merging.
+            if (data.students && data.students !== "null") {
+                localStorage.setItem('students', data.students);
+            }
+            if (data.logs && data.logs !== "null") {
+                localStorage.setItem('attendanceLogs', data.logs);
+            }
+            if (data.config && data.config !== "{}" && data.config !== "null") {
+                localStorage.setItem('sys_config', data.config);
+                applySystemConfig(); 
+            }
 
-        if (document.getElementById('admin-dashboard-view').classList.contains('active')) {
-            if (typeof renderStudents === 'function') renderStudents();
-            if (typeof renderLogs === 'function') renderLogs();
-            if (typeof renderSchedule === 'function') renderSchedule();
+            if (document.getElementById('admin-dashboard-view').classList.contains('active')) {
+                if (typeof renderStudents === 'function') renderStudents();
+                if (typeof renderLogs === 'function') renderLogs();
+                if (typeof renderSchedule === 'function') renderSchedule();
+            }
         }
     } catch (e) {
-        console.warn("Cloud infrastructure tracking pull failed or timed out.", e);
+        console.warn("Cloud pull failed or timed out. Retrying next cycle.", e);
     } finally {
         isSyncing = false;
     }
@@ -743,7 +746,6 @@ async function generateRegistrationLink() {
 
 async function createStudent() {
     if(!isAuthenticated()) return;
-    await pullFromCloud();
     const nameInput = document.getElementById('new-student-name').value.trim();
     const idInput = document.getElementById('new-student-id').value.trim();
     const classLvl = document.getElementById('new-student-class').value;
@@ -989,8 +991,6 @@ async function saveStudentEdit() {
 async function deleteStudent(idNum) {
     if(!isAuthenticated()) return;
     if (!confirm("Are you sure you want to permanently delete this student?")) return;
-
-    pullFromCloud
     
     let students = JSON.parse(localStorage.getItem('students')) || [];
     students = students.filter(s => String(s.id) !== String(idNum));
@@ -1012,7 +1012,6 @@ async function deleteStudent(idNum) {
 
 async function toggleAssignedDay(studentId, dayStr, btnElement) {
     if(!isAuthenticated()) return;
-    await pullFromCloud();
     let students = JSON.parse(localStorage.getItem('students')) || [];
     const studentIndex = students.findIndex(s => String(s.id) === String(studentId));
     
@@ -1051,39 +1050,69 @@ async function logAttendanceAction(student, action, endOfShiftDetails = null, ov
     const shift = getShiftDateDetails();
     const dateStr = overrideDateStr || shift.dateStr;
     
-    const singleLogPayload = {
-        id: student.id,
+    const newLog = {
         name: student.name || 'Unknown',
+        id: student.id,
         action: action,
         time: shift.realTimeStr,
         date: dateStr,
-        gcHandle: endOfShiftDetails ? endOfShiftDetails.gcHandle : null,
-        announcement: endOfShiftDetails ? endOfShiftDetails.announcement : null,
-        whoPosted: endOfShiftDetails ? endOfShiftDetails.whoPosted : null
+        details: endOfShiftDetails 
     };
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 12000); 
+    let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
+    if(logs.some(l => l.id === 'SYS_DELETED_DATE' && l.date === dateStr)) {
+        logs = logs.filter(l => !(l.id === 'SYS_DELETED_DATE' && l.date === dateStr));
+    }
 
-    const response = await fetch(`${API_BASE_URL}/logs/add`, {
+    const tempLogs = [...logs, newLog];
+    const studentsData = localStorage.getItem('students') || "[]";
+    const logsData = JSON.stringify(tempLogs);
+    const configData = localStorage.getItem('sys_config') || '{"locked":false,"regOpen":false}';
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000); 
+
+    // 1. PUSH TO DATABASE
+    const response = await fetch(`${API_BASE_URL}/sync/push`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(singleLogPayload),
+        body: JSON.stringify({ students: studentsData, logs: logsData, config: configData }),
         signal: controller.signal
     });
     
     clearTimeout(timeoutId);
-    if (!response.ok) throw new Error("Server rejected the transactional record insert.");
+    if (!response.ok) throw new Error("Server rejected the database insertion.");
 
-    await pullFromCloud();
+    // 🟢 2. THE DOUBLE CHECK (Verification)
+    const verifyRes = await fetch(`${API_BASE_URL}/sync/pull?t=${Date.now()}`, {
+        cache: 'no-store',
+        headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
+    });
+
+    if (!verifyRes.ok) throw new Error("Could not verify database entry.");
+    
+    const verifyData = await verifyRes.json();
+    const serverLogs = JSON.parse(verifyData.logs || "[]");
+
+    // Physically check the database
+    const isActuallySaved = serverLogs.some(l => 
+        String(l.id) === String(student.id) && 
+        l.date === dateStr && 
+        l.action === action
+    );
+
+    if (!isActuallySaved) {
+        throw new Error("Verification failed: The database dropped the data.");
+    }
+
+    // 🟢 3. ONLY ON VERIFIED SUCCESS: Update UI
+    localStorage.setItem('attendanceLogs', verifyData.logs); // Overwrite with DB truth
     lastDataPushTime = Date.now();
     forceInstantUIRefresh();
 }
 
 async function deleteLog(idNum, dateStr) {
     if(!isAuthenticated()) return;
-
-    await pullFromCloud();
 
     // 1. Safety check to ensure the button actually passed the right data
     if (!idNum || !dateStr) {
@@ -1186,8 +1215,6 @@ function closeExemptModal() {
 
 async function applyExempt(type) {
     if(!isAuthenticated()) return;
-
-    await pullFromCloud();
     
     const clickedBtn = window.event ? window.event.target.closest('button') : null;
     const originalText = clickedBtn ? clickedBtn.textContent : "";
@@ -1275,8 +1302,6 @@ async function exemptAllForDate(dateStr) {
     const verificationText = prompt(`⚠️ WARNING ⚠️\n\nThis will mark EVERYONE on ${dateStr} as Exempted.\n\nTo confirm, type exactly:\nExempt Everyone`);
     
     if (verificationText === "Exempt Everyone") {
-
-        await pullFromCloud();
         
         // Lock the sync engine
         lastDataPushTime = Date.now(); 
@@ -1501,32 +1526,59 @@ async function handleTimeIn() {
         if (alreadyTimedIn) { messageEl.textContent = "You have already timed in for this shift."; messageEl.className = "message error"; stopAnim(); return; }
 
         const newLog = {
-            id: student.id,
             name: student.name,
+            id: student.id,
             action: actionStr,
             time: shift.realTimeStr,
             date: shift.dateStr,
-            gcHandle: null,
-            announcement: null,
-            whoPosted: null
+            details: null
         };
 
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000); 
+        const tempLogs = [...logs, newLog];
+        const studentsData = localStorage.getItem('students') || "[]";
+        const logsData = JSON.stringify(tempLogs);
+        const configData = localStorage.getItem('sys_config') || '{"locked":false,"regOpen":false}';
 
-        const response = await fetch(`${API_BASE_URL}/logs/add`, {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 20000); 
+
+        // 1. PUSH TO DATABASE
+        const response = await fetch(`${API_BASE_URL}/sync/push`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(newLog),
+            body: JSON.stringify({ students: studentsData, logs: logsData, config: configData }),
             signal: controller.signal
         });
         
         clearTimeout(timeoutId);
-        if (!response.ok) throw new Error("Server connection rejected insertion processing.");
+        if (!response.ok) throw new Error("Server rejected the database insertion.");
 
+        // 🟢 2. THE DOUBLE CHECK (Verification)
         if (btnIn) btnIn.textContent = "VERIFYING...";
         
-        await pullFromCloud();
+        const verifyRes = await fetch(`${API_BASE_URL}/sync/pull?t=${Date.now()}`, {
+            cache: 'no-store',
+            headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
+        });
+
+        if (!verifyRes.ok) throw new Error("Could not verify database entry.");
+        
+        const verifyData = await verifyRes.json();
+        const serverLogs = JSON.parse(verifyData.logs || "[]");
+
+        // Physically check the database to see if the log exists
+        const isActuallySaved = serverLogs.some(l => 
+            String(l.id) === String(student.id) && 
+            l.date === shift.dateStr && 
+            l.action === actionStr
+        );
+
+        if (!isActuallySaved) {
+            throw new Error("Verification failed: The database dropped the data.");
+        }
+
+        // 🟢 3. ONLY ON VERIFIED SUCCESS: Update UI with strict Database Data
+        localStorage.setItem('attendanceLogs', verifyData.logs); // Overwrite with DB truth
         localStorage.setItem('activeDeviceStudent', student.id);
         lastDataPushTime = Date.now();
         
@@ -4307,57 +4359,92 @@ async function handleTimeOut() {
         const alreadyTimedOut = logs.some(l => String(l.id).toLowerCase() === studentId.toLowerCase() && l.date === shift.dateStr && l.action.includes('Time Out'));
         if (alreadyTimedOut) { messageEl.textContent = "You have already timed out for this shift."; messageEl.className = "message error"; stopAnim(); return; }
 
+        // Stop the front button animation, moving to modal phase
         stopAnim();
 
+        // 🟢 SHOW MODAL AND GET DATA
         const reportData = await askForShiftReport(student.gcHandle, student.name);
-        if (!reportData) return; 
+        if (!reportData) return; // User clicked cancel on the modal
 
+        // Now we process the DB push. The modal is still open, saying "Submitting..."
         const newLog = {
-            id: student.id,
             name: student.name,
+            id: student.id,
             action: actionStr,
             time: shift.realTimeStr,
             date: shift.dateStr,
-            gcHandle: reportData.gc,
-            announcement: reportData.ann,
-            whoPosted: reportData.name
+            details: {
+                gcHandle: reportData.gc,
+                announcement: reportData.ann,
+                whoPosted: reportData.name
+            } 
         };
 
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000); 
+        const tempLogs = [...logs, newLog];
+        const studentsData = localStorage.getItem('students') || "[]";
+        const logsData = JSON.stringify(tempLogs);
+        const configData = localStorage.getItem('sys_config') || '{"locked":false,"regOpen":false}';
 
-        const response = await fetch(`${API_BASE_URL}/logs/add`, {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 20000); 
+
+        // 1. PUSH DIRECTLY TO DATABASE
+        const response = await fetch(`${API_BASE_URL}/sync/push`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(newLog),
+            body: JSON.stringify({ students: studentsData, logs: logsData, config: configData }),
             signal: controller.signal
         });
         
         clearTimeout(timeoutId);
-        if (!response.ok) throw new Error("Server rejected the transactional record insert.");
+        if (!response.ok) throw new Error("Server rejected the database insertion.");
 
+        // 🟢 2. THE DOUBLE CHECK (Verification)
         const submitBtn = document.getElementById('rep-submit');
-        if (submitBtn) submitBtn.textContent = "VERIFYING DB...";
+        if (submitBtn) submitBtn.textContent = "VERIFYING DB..."; // Changes text inside modal
         
-        await pullFromCloud();
-        localStorage.removeItem('activeDeviceStudent'); 
+        const verifyRes = await fetch(`${API_BASE_URL}/sync/pull?t=${Date.now()}`, {
+            cache: 'no-store',
+            headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
+        });
+
+        if (!verifyRes.ok) throw new Error("Could not verify database entry.");
+        
+        const verifyData = await verifyRes.json();
+        const serverLogs = JSON.parse(verifyData.logs || "[]");
+
+        // Physically check the database to confirm it saved
+        const isActuallySaved = serverLogs.some(l => 
+            String(l.id) === String(student.id) && 
+            l.date === shift.dateStr && 
+            l.action === actionStr
+        );
+
+        if (!isActuallySaved) {
+            throw new Error("Verification failed: Database dropped the data.");
+        }
+
+        // 🟢 3. SUCCESS: Update UI and clear locks
+        localStorage.setItem('attendanceLogs', verifyData.logs); // Overwrite with true DB data
+        localStorage.removeItem('activeDeviceStudent'); // 🟢 THIS REMOVES THE DEVICE LOCK!
         lastDataPushTime = Date.now();
         
+        // 🟢 PROFESSIONAL SUCCESS MESSAGE
         messageEl.textContent = `Success: ${student.name} - ${actionStr} at ${shift.realTimeStr}`;
         messageEl.className = "message success";
         idInput.value = ''; 
 
         const modal = document.getElementById('shift-report-modal');
-        if (modal) modal.remove(); 
+        if (modal) modal.remove(); // Destroy modal so they can see the success text
 
-        checkDeviceLock(); 
+        checkDeviceLock(); // Refreshes the UI to officially hide the yellow lock box
         forceInstantUIRefresh();
 
     } catch (error) {
         console.error(error);
         const submitBtn = document.getElementById('rep-submit');
         if (submitBtn) {
-            submitBtn.textContent = "Submit";
+            submitBtn.textContent = "Submit"; // Reset modal button so they can try again
             submitBtn.disabled = false;
             submitBtn.style.opacity = "1";
         }
