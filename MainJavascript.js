@@ -739,6 +739,49 @@ async function generateRegistrationLink() {
     }
 }
 
+async function safeDatabaseUpdate(actionMessage, updateLogic) {
+    showLoadingOverlay(`Syncing ${actionMessage}...`);
+    try {
+        // 1. STRICT PULL: Force the device to download the absolute latest truth from the database first
+        const pullRes = await fetch(`${API_BASE_URL}/sync/pull?t=${Date.now()}`, { cache: 'no-store' });
+        if (pullRes.ok) {
+            const data = await pullRes.json();
+            if (data.students && data.students !== "null") localStorage.setItem('students', data.students);
+            if (data.logs && data.logs !== "null") localStorage.setItem('attendanceLogs', data.logs);
+            if (data.config && data.config !== "{}" && data.config !== "null") localStorage.setItem('sys_config', data.config);
+        } else {
+            throw new Error("Could not fetch latest database state.");
+        }
+
+        // 2. APPLY EDIT: Run your local change on the freshly downloaded data
+        const proceed = updateLogic();
+        if (proceed === false) {
+            hideLoadingOverlay();
+            return;
+        }
+
+        // 3. STRICT PUSH: Upload the safely merged data back to the database
+        const studentsData = localStorage.getItem('students') || "[]";
+        const logsData = localStorage.getItem('attendanceLogs') || "[]";
+        const configData = localStorage.getItem('sys_config') || '{"locked":false,"regOpen":false}';
+
+        const pushRes = await fetch(`${API_BASE_URL}/sync/push`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ students: studentsData, logs: logsData, config: configData })
+        });
+
+        if (!pushRes.ok) throw new Error("Database rejected update.");
+
+        forceInstantUIRefresh();
+    } catch (e) {
+        console.error(e);
+        alert(`Network Error during ${actionMessage}. Please try again.`);
+    } finally {
+        hideLoadingOverlay();
+    }
+}
+
 async function createStudent() {
     if(!isAuthenticated()) return;
     const nameInput = document.getElementById('new-student-name').value.trim();
@@ -756,7 +799,7 @@ async function createStudent() {
         if (otherInput) gcHandle = otherInput.value.trim();
     }
 
-    await directDatabaseUpdate("New Student", () => {
+    await safeDatabaseUpdate("New Student", () => {
         let students = JSON.parse(localStorage.getItem('students')) || [];
         if (students.find(s => String(s.id) === idInput)) {
             msg.textContent = "Student ID already exists!"; msg.className = "message error"; return false;
@@ -801,7 +844,7 @@ async function updateStudentGC() {
 
     if (!idNum) { showMessage('edit-gc-message', 'Please enter a Student ID.', 'error'); return; }
 
-    await directDatabaseUpdate("Update GC Handle", () => {
+    await safeDatabaseUpdate("GC Handle Update", () => {
         const students = JSON.parse(localStorage.getItem('students')) || [];
         const studentIndex = students.findIndex(s => String(s.id) === String(idNum));
 
@@ -867,7 +910,6 @@ function closeEditStudentModal() {
 
 async function saveStudentEdit() {
     if(!isAuthenticated()) return;
-    
     const origId = document.getElementById('edit-stu-orig-id').value;
     const newName = document.getElementById('edit-stu-name').value.trim();
     const newId = document.getElementById('edit-stu-id').value.trim();
@@ -877,13 +919,12 @@ async function saveStudentEdit() {
 
     if (!newName || !newId) { alert("Name and ID cannot be empty."); return; }
 
-    await directDatabaseUpdate("Student Update", () => {
+    await safeDatabaseUpdate("Student Edit", () => {
         let students = JSON.parse(localStorage.getItem('students')) || [];
         let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
 
         if (origId !== newId && students.some(s => String(s.id) === newId)) {
-            alert("This Student ID is already in use by another student.");
-            return false;
+            alert("This Student ID is already in use by another student."); return false;
         }
 
         const studentIndex = students.findIndex(s => String(s.id) === origId);
@@ -905,7 +946,7 @@ async function deleteStudent(idNum) {
     if(!isAuthenticated()) return;
     if (!confirm(`Are you sure you want to permanently delete student ID ${idNum}?`)) return;
 
-    await directDatabaseUpdate("Delete Student", () => {
+    await safeDatabaseUpdate("Delete Student", () => {
         let students = JSON.parse(localStorage.getItem('students')) || [];
         students = students.filter(s => String(s.id) !== String(idNum));
         localStorage.setItem('students', JSON.stringify(students));
@@ -919,14 +960,13 @@ async function deleteStudent(idNum) {
 async function toggleAssignedDay(studentId, dayStr, btnElement) {
     if(!isAuthenticated()) return;
 
-    await directDatabaseUpdate("Schedule Update", () => {
+    await safeDatabaseUpdate("Schedule Update", () => {
         let students = JSON.parse(localStorage.getItem('students')) || [];
         const studentIndex = students.findIndex(s => String(s.id) === String(studentId));
         
         if (studentIndex > -1) {
             if (!students[studentIndex].assignedDays) students[studentIndex].assignedDays = [];
             const hasDay = students[studentIndex].assignedDays.includes(dayStr);
-            
             if (hasDay) {
                 students[studentIndex].assignedDays = students[studentIndex].assignedDays.filter(d => d !== dayStr);
                 btnElement.classList.remove('active');
@@ -1014,7 +1054,7 @@ async function deleteLog(idNum, dateStr) {
     if (!idNum || !dateStr) return;
     if (!confirm("Are you sure you want to delete this attendance record?")) return;
 
-    await directDatabaseUpdate("Delete Log", () => {
+    await safeDatabaseUpdate("Delete Log", () => {
         let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
         logs = logs.filter(l => !(String(l.id).trim() === String(idNum).trim() && String(l.date).trim() === String(dateStr).trim()));
         localStorage.setItem('attendanceLogs', JSON.stringify(logs));
@@ -1026,8 +1066,7 @@ async function deleteHistoryDate(dateStr, event) {
     if (event) event.stopPropagation(); 
     
     if(confirm(`⚠️ WARNING ⚠️\n\nAre you sure you want to completely delete ALL attendance logs for ${dateStr}?\n\nThis will permanently remove this day from the students' Performance Stats.`)) {
-        
-        await directDatabaseUpdate("Delete Date Record", () => {
+        await safeDatabaseUpdate("Delete Date", () => {
             let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
             logs = logs.filter(l => l.date !== dateStr);
             logs.push({ name: 'SYSTEM_DELETED', id: 'SYS_DELETED_DATE', action: 'DELETED', time: '00:00 AM', date: dateStr, details: null });
@@ -1066,7 +1105,7 @@ function closeExemptModal() {
 async function applyExempt(type) {
     if(!isAuthenticated()) return;
 
-    await directDatabaseUpdate("Exemption", () => {
+    await safeDatabaseUpdate("Exemption", () => {
         let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
         const students = JSON.parse(localStorage.getItem('students')) || [];
         const s = students.find(x => String(x.id) === String(pendingExemptId));
@@ -1095,7 +1134,7 @@ async function applyExempt(type) {
 async function removeExemptions(idNum, dateStr) {
     if(!isAuthenticated()) return;
 
-    await directDatabaseUpdate("Remove Exemption", () => {
+    await safeDatabaseUpdate("Remove Exemption", () => {
         let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
         const exemptLogs = logs.filter(l => String(l.id) === String(idNum) && l.date === dateStr && l.action.includes('Exempted'));
         logs = logs.filter(l => !(String(l.id) === String(idNum) && l.date === dateStr && l.action.includes('Exempted')));
@@ -1145,11 +1184,10 @@ async function createManualHistoryDate() {
         if(isNaN(parsed)) throw new Error("");
         dateStr = parsed.toLocaleDateString('en-US'); 
     } catch(e) {
-        alert("Invalid date format. Please use M/D/YYYY (e.g., 5/4/2026).");
-        return;
+        alert("Invalid date format. Please use M/D/YYYY (e.g., 5/4/2026)."); return;
     }
 
-    await directDatabaseUpdate("New History Card", () => {
+    await safeDatabaseUpdate("New History Card", () => {
         let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
         const isTombstoned = logs.some(l => l.id === 'SYS_DELETED_DATE' && l.date === dateStr);
         const hasActualLogs = logs.some(l => l.date === dateStr && l.id !== 'SYS_DELETED_DATE');
@@ -1233,7 +1271,7 @@ async function handleTimeIn() {
         let dots = 0;
         animInterval = setInterval(() => {
             dots = (dots + 1) % 4;
-            btnIn.textContent = "SAVING YOUR TIME IN" + ".".repeat(dots);
+            btnIn.textContent = "SAVING" + ".".repeat(dots);
         }, 500);
     }
 
@@ -1247,8 +1285,6 @@ async function handleTimeIn() {
     };
 
     try {
-        await pullFromCloud();
-
         const idInput = document.getElementById('student-id-input'); 
         const messageEl = document.getElementById('student-message');
 
@@ -1258,7 +1294,6 @@ async function handleTimeIn() {
         if (!studentId) { messageEl.textContent = "Please enter your Student ID Number."; messageEl.className = "message error"; stopAnim(); return; }
 
         const timeWindow = getCurrentTimeWindow();
-
         if (timeWindow === "TOO_EARLY") { messageEl.textContent = "Shift has not started yet. Time In opens at 5:00 AM."; messageEl.className = "message error"; stopAnim(); return; }
         if (timeWindow === "LOCKOUT") { messageEl.textContent = "System Locked (12:01 PM - 4:59 PM). If you missed Time In, you are marked Absent."; messageEl.className = "message error"; stopAnim(); return; }
         if (timeWindow === "TIME_OUT_NORMAL" || timeWindow === "TIME_OUT_LATE") { messageEl.textContent = "Time In is closed for this shift. It is currently the Time Out period."; messageEl.className = "message error"; stopAnim(); return; }
@@ -1266,8 +1301,13 @@ async function handleTimeIn() {
         let actionStr = "Time In";
         if (timeWindow === "TIME_IN_LATE") actionStr = "Time In (Late)";
 
-        const students = JSON.parse(localStorage.getItem('students')) || [];
-        let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
+        // 1. STRICT PULL BEFORE TIME IN
+        const pullRes = await fetch(`${API_BASE_URL}/sync/pull?t=${Date.now()}`, { cache: 'no-store' });
+        if (!pullRes.ok) throw new Error("Could not fetch database to verify identity.");
+        const dbData = await pullRes.json();
+        
+        const students = JSON.parse(dbData.students || "[]");
+        let logs = JSON.parse(dbData.logs || "[]");
         const shift = getShiftDateDetails();
 
         const student = students.find(s => String(s.id).toLowerCase() === studentId.toLowerCase());
@@ -1278,62 +1318,26 @@ async function handleTimeIn() {
         const alreadyTimedIn = logs.some(l => String(l.id).toLowerCase() === studentId.toLowerCase() && l.date === shift.dateStr && l.action.includes('Time In'));
         if (alreadyTimedIn) { messageEl.textContent = "You have already timed in for this shift."; messageEl.className = "message error"; stopAnim(); return; }
 
-        const newLog = {
+        logs.push({
             name: student.name,
             id: student.id,
             action: actionStr,
             time: shift.realTimeStr,
             date: shift.dateStr,
             details: null
-        };
+        });
 
-        const tempLogs = [...logs, newLog];
-        const studentsData = localStorage.getItem('students') || "[]";
-        const logsData = JSON.stringify(tempLogs);
-        const configData = localStorage.getItem('sys_config') || '{"locked":false,"regOpen":false}';
-
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 20000); 
-
-        // 1. PUSH TO DATABASE
-        const response = await fetch(`${API_BASE_URL}/sync/push`, {
+        // 2. STRICT PUSH BACK TO DB
+        const pushRes = await fetch(`${API_BASE_URL}/sync/push`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ students: studentsData, logs: logsData, config: configData }),
-            signal: controller.signal
+            body: JSON.stringify({ students: dbData.students, logs: JSON.stringify(logs), config: dbData.config || "{}" })
         });
         
-        clearTimeout(timeoutId);
-        if (!response.ok) throw new Error("Server rejected the database insertion.");
+        if (!pushRes.ok) throw new Error("Server rejected the database insertion.");
 
-        // 🟢 2. THE DOUBLE CHECK (Verification)
-        if (btnIn) btnIn.textContent = "VERIFYING...";
-        
-        const verifyRes = await fetch(`${API_BASE_URL}/sync/pull?t=${Date.now()}`, {
-            cache: 'no-store',
-            headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
-        });
-
-        if (!verifyRes.ok) throw new Error("Could not verify database entry.");
-        
-        const verifyData = await verifyRes.json();
-        const serverLogs = JSON.parse(verifyData.logs || "[]");
-
-        // Physically check the database to see if the log exists
-        const isActuallySaved = serverLogs.some(l => 
-            String(l.id) === String(student.id) && 
-            l.date === shift.dateStr && 
-            l.action === actionStr
-        );
-
-        if (!isActuallySaved) {
-            throw new Error("Verification failed: The database dropped the data.");
-        }
-
-        // 🟢 3. ONLY ON VERIFIED SUCCESS: Update UI with strict Database Data
-        localStorage.setItem('attendanceLogs', verifyData.logs); // Overwrite with DB truth
+        localStorage.setItem('attendanceLogs', JSON.stringify(logs));
         localStorage.setItem('activeDeviceStudent', student.id);
-        lastDataPushTime = Date.now();
         
         messageEl.textContent = `Success: ${student.name} - ${actionStr} at ${shift.realTimeStr}`;
         messageEl.className = "message success";
@@ -1347,7 +1351,7 @@ async function handleTimeIn() {
         console.error(error);
         const messageEl = document.getElementById('student-message');
         if (messageEl) {
-            messageEl.textContent = "Error: System failed to save to database. Please try again.";
+            messageEl.textContent = "Error: System failed to save to database. Please check connection.";
             messageEl.className = "message error";
         }
         stopAnim(); 
@@ -3478,7 +3482,6 @@ function closeEditLogModal() {
 
 async function saveEditLogModal() {
     if(!isAuthenticated()) return;
-
     const idNum = document.getElementById('edit-log-id').value;
     const dateStr = document.getElementById('edit-log-date').value;
     const inVal = document.getElementById('edit-log-in').value.trim();
@@ -3492,7 +3495,7 @@ async function saveEditLogModal() {
     if (inVal && !timeRegex.test(inVal)) { alert("Invalid Time In format."); return; }
     if (outVal && !timeRegex.test(outVal)) { alert("Invalid Time Out format."); return; }
 
-    await directDatabaseUpdate("Log Update", () => {
+    await safeDatabaseUpdate("Log Edit", () => {
         let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
         const students = JSON.parse(localStorage.getItem('students')) || [];
         const student = students.find(s => String(s.id) === String(idNum));
@@ -4005,6 +4008,8 @@ function viewHistoryDetails(studentId, historyDateStr) {
 }
 
 async function handleTimeOut() {
+    if (typeof isServerKnownAwake !== 'undefined' && !isServerKnownAwake) return;
+
     const btnOut = document.querySelector('.btn-out');
     let animInterval;
 
@@ -4029,8 +4034,6 @@ async function handleTimeOut() {
     };
 
     try {
-        await pullFromCloud();
-
         const idInput = document.getElementById('student-id-input'); 
         const messageEl = document.getElementById('student-message');
 
@@ -4040,15 +4043,19 @@ async function handleTimeOut() {
         if (!studentId) { messageEl.textContent = "Please enter your Student ID Number."; messageEl.className = "message error"; stopAnim(); return; }
 
         const timeWindow = getCurrentTimeWindow();
-
         if (timeWindow === "LOCKOUT") { messageEl.textContent = "System Locked (12:01 PM - 4:59 PM). Time Out opens at 5:00 PM."; messageEl.className = "message error"; stopAnim(); return; }
         if (timeWindow === "TIME_IN_NORMAL" || timeWindow === "TIME_IN_LATE" || timeWindow === "TOO_EARLY") { messageEl.textContent = "It is too early to Time Out. Time Out opens at 5:00 PM."; messageEl.className = "message error"; stopAnim(); return; }
 
         let actionStr = "Time Out";
         if (timeWindow === "TIME_OUT_LATE") actionStr = "Time Out (Late)";
 
-        const students = JSON.parse(localStorage.getItem('students')) || [];
-        let logs = JSON.parse(localStorage.getItem('attendanceLogs')) || [];
+        // 1. STRICT PULL BEFORE TIME OUT
+        const pullRes = await fetch(`${API_BASE_URL}/sync/pull?t=${Date.now()}`, { cache: 'no-store' });
+        if (!pullRes.ok) throw new Error("Could not verify state from database.");
+        const dbData = await pullRes.json();
+        
+        const students = JSON.parse(dbData.students || "[]");
+        let logs = JSON.parse(dbData.logs || "[]");
         const shift = getShiftDateDetails();
 
         const student = students.find(s => String(s.id).toLowerCase() === studentId.toLowerCase());
@@ -4062,98 +4069,52 @@ async function handleTimeOut() {
         const alreadyTimedOut = logs.some(l => String(l.id).toLowerCase() === studentId.toLowerCase() && l.date === shift.dateStr && l.action.includes('Time Out'));
         if (alreadyTimedOut) { messageEl.textContent = "You have already timed out for this shift."; messageEl.className = "message error"; stopAnim(); return; }
 
-        // Stop the front button animation, moving to modal phase
         stopAnim();
 
-        // 🟢 SHOW MODAL AND GET DATA
         const reportData = await askForShiftReport(student.gcHandle, student.name);
-        if (!reportData) return; // User clicked cancel on the modal
+        if (!reportData) return; 
 
-        // Now we process the DB push. The modal is still open, saying "Submitting..."
-        const newLog = {
+        logs.push({
             name: student.name,
             id: student.id,
             action: actionStr,
             time: shift.realTimeStr,
             date: shift.dateStr,
-            details: {
-                gcHandle: reportData.gc,
-                announcement: reportData.ann,
-                whoPosted: reportData.name
-            } 
-        };
+            details: { gcHandle: reportData.gc, announcement: reportData.ann, whoPosted: reportData.name } 
+        });
 
-        const tempLogs = [...logs, newLog];
-        const studentsData = localStorage.getItem('students') || "[]";
-        const logsData = JSON.stringify(tempLogs);
-        const configData = localStorage.getItem('sys_config') || '{"locked":false,"regOpen":false}';
-
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 20000); 
-
-        // 1. PUSH DIRECTLY TO DATABASE
-        const response = await fetch(`${API_BASE_URL}/sync/push`, {
+        // 2. STRICT PUSH
+        const pushRes = await fetch(`${API_BASE_URL}/sync/push`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ students: studentsData, logs: logsData, config: configData }),
-            signal: controller.signal
+            body: JSON.stringify({ students: dbData.students, logs: JSON.stringify(logs), config: dbData.config || "{}" })
         });
         
-        clearTimeout(timeoutId);
-        if (!response.ok) throw new Error("Server rejected the database insertion.");
+        if (!pushRes.ok) throw new Error("Server rejected the database insertion.");
 
-        // 🟢 2. THE DOUBLE CHECK (Verification)
-        const submitBtn = document.getElementById('rep-submit');
-        if (submitBtn) submitBtn.textContent = "VERIFYING DB..."; // Changes text inside modal
+        localStorage.setItem('attendanceLogs', JSON.stringify(logs));
+        localStorage.removeItem('activeDeviceStudent'); 
         
-        const verifyRes = await fetch(`${API_BASE_URL}/sync/pull?t=${Date.now()}`, {
-            cache: 'no-store',
-            headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
-        });
-
-        if (!verifyRes.ok) throw new Error("Could not verify database entry.");
-        
-        const verifyData = await verifyRes.json();
-        const serverLogs = JSON.parse(verifyData.logs || "[]");
-
-        // Physically check the database to confirm it saved
-        const isActuallySaved = serverLogs.some(l => 
-            String(l.id) === String(student.id) && 
-            l.date === shift.dateStr && 
-            l.action === actionStr
-        );
-
-        if (!isActuallySaved) {
-            throw new Error("Verification failed: Database dropped the data.");
-        }
-
-        // 🟢 3. SUCCESS: Update UI and clear locks
-        localStorage.setItem('attendanceLogs', verifyData.logs); // Overwrite with true DB data
-        localStorage.removeItem('activeDeviceStudent'); // 🟢 THIS REMOVES THE DEVICE LOCK!
-        lastDataPushTime = Date.now();
-        
-        // 🟢 PROFESSIONAL SUCCESS MESSAGE
         messageEl.textContent = `Success: ${student.name} - ${actionStr} at ${shift.realTimeStr}`;
         messageEl.className = "message success";
         idInput.value = ''; 
 
         const modal = document.getElementById('shift-report-modal');
-        if (modal) modal.remove(); // Destroy modal so they can see the success text
+        if (modal) modal.remove(); 
 
-        checkDeviceLock(); // Refreshes the UI to officially hide the yellow lock box
+        checkDeviceLock(); 
         forceInstantUIRefresh();
 
     } catch (error) {
         console.error(error);
         const submitBtn = document.getElementById('rep-submit');
         if (submitBtn) {
-            submitBtn.textContent = "Submit"; // Reset modal button so they can try again
+            submitBtn.textContent = "Submit"; 
             submitBtn.disabled = false;
             submitBtn.style.opacity = "1";
         }
         const cancelBtn = document.getElementById('rep-cancel');
         if (cancelBtn) cancelBtn.style.display = "block";
-
         alert("Network Error: Could not verify Time Out in the Database. Please click Submit again.");
     }
 }
